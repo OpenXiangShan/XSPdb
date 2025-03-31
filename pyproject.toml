@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=61.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "XSPdb"
+version = "0.1.0"
+description = "XSPdb is pdb based debuging package for XiangShan, and also support other opensource RISC-V processors"
+authors = [
+    { name = "XSMLVP team", email = "yaozhicheng@ict.ac.cn" },
+]
+readme = "README.en.md"
+license = { text = "MulanPSL2" }  # or SPDX identifier like "MIT"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+]
+requires-python = ">=3.8"
+dependencies = [
+    "urwid>=2.6.16",
+    "capstone>=5.0.5"
+]
+
+[tool.setuptools]
+packages = ["XSPdb"]
+include-package-data = true
+
+[tool.setuptools.package-data]
+"XSPdb" = ["*.ld", "*.s"]
