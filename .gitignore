@@ -1,3 +1,9 @@
+# XSPdb
+
+ready-to-run/*
+*.tar.gz
+XSPython/*
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

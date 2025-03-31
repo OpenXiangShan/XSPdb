@@ -2,11 +2,70 @@
 
 [中文介绍](README.cn.md)
 
-XSPdb is a Python-based extension of `pdb` designed for the XiangShan IP, providing GDB-like "interactive debugging" capabilities. It supports features such as a text-based user interface, waveform enable/disable controls, script playback, snapshots, register initialization, memory read/write operations, and disassembly, etc.
+XSPdb is a specialized Python pdb-based debugging tool for RISC-V IP cores, customized for Xiangshan's difftest interface. It provides GDB-like interactive debugging capabilities, integrating: Terminal command-line interface, RTL-level waveform toggling, Automated script replay, System snapshot save/restore, Register initialization configuration, Instruction set disassembly, etc. Advanced debugging features: conditional breakpoints, real-time watchpoints, register/memory visualization, Hardware signal-level debugging interface synchronized with software execution states. It is a Hardware/software co-verification solution for RISC-V IPs.
+
+### Installation & Dependencies
+
+Clone repository and install dependencies:
+```bash
+git clone https://github.com/OpenXiangShan/XSPdb.git # Clone repository
+pip install -r XSPdb/requirements.txt                # Install dependencies
+pip install .                                        # Optional installation
+```
+
+If source integration is not required, use alternative pip installation:
+```bash
+pip3 install XSPdb@git+https://github.com/OpenXiangShan/XSPdb@master
+```
 
 ### Quick Start
 
-TBD
+After cloning, run test suite:
+```bash
+cd XSPdb
+make test
+```
+
+This command executes:
+- Downloads Xiangshan Python binaries
+- Fetches test binaries
+- Launches interactive debug via example/test.py
+
+Example output and interaction:
+```bash
+LD_PRELOAD=XSPython/xspcomm/libxspcomm.so.0.0.1 PYTHONPATH=. python3 example/test.py
+Using simulated 32768B flash
+[Info] reset complete
+> XSPdb/example/test.py(13)test_sim_top()
+-> while True:
+(XiangShan) # Enter interactive mode (use Tab for command list)
+(XiangShan)xui                               # Enter TUI mode
+(XiangShan)xload ready-to-run/microbench.bin # Load binary (Tab-compatible)
+(XiangShan)xistep                            # Step to next instruction commit
+(XiangShan)xstep 10000                       # Execute 10000 cycles
+```
+
+**Note**: XSPdb prioritizes `spike-dasm` for disassembly, falling back to `capstone`(limited instruction support).
+
+### Manual Testing
+
+Prerequisite: Build Xiangshan Python simulator ([build guide]()).
+
+Alternative: Download prebuilt binaries:
+```bash
+cd XSPdb
+wget https://github.com/OpenXiangShan/XSPdb/releases/download/v0.1.0-test/XSPython.tar.gz
+wget https://github.com/OpenXiangShan/XSPdb/releases/download/v0.1.0-test/ready-to-run.tar.gz
+tar xf XSPython.tar.gz
+tar xf ready-to-run.tar.gz
+```
+
+Launch test:
+```bash
+LD_PRELOAD=XSPython/xspcomm/libxspcomm.so.0.0.1 PYTHONPATH=. python3 example/test.py
+```
+
+**Node**: The reason for using `LD_PRELOAD` to load `xspcomm` in advance is to prevent version conflicts between the `system xspcomm` library and `the local xspcomm `packaged in XSPython.
 
 ### Common Commands：
 
