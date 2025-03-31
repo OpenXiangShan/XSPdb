@@ -1,0 +1,25 @@
+tflash ready-to-run/XSPdb.bin  # 加载flash
+tset_ireg mpc 0x800116b0
+tload_reg_file example.reg
+tload_instr_file 0x800116b0 example.ins
+#twatch_commit_pc 0x800116b0
+#twatch_commit_pc 0x800116d4
+#tset_freg ft0 0xffffffff7fc00001
+tistep
+# 保留 0x80011708 fround.s
+#tnop_insert 0x800116b0 0x80011708      # 0x80011708 之前全noop
+#tnop_insert 0x8001170c 0x8001174a      # 0x80011708 之后全noop
+# 保留 0x8001170c froundnx.s
+#tnop_insert 0x800116b0 0x8001170c      # 0x80011708 之前全noop
+#tnop_insert 0x80011710 0x8001174a      # 0x80011708 之后全noop
+
+# 保留 0x800116e8: 53f15e40  froundnx.s ft2, ft9
+#tnop_insert 0x800116b0 0x800116e8      # 0x80011708 之前全noop
+#tnop_insert 0x800116ec 0x8001174a      # 0x80011708 之后全noop
+
+# 0x800116e8: 53f14e40   fround.s ft2, ft9
+# 0x40442153 -> tmem_write 0x800116e8 b'\x53\xf1\x4e\x40'
+
+tdasm 0x800116b0 2
+#texport_bin 0x80011800 tmp/test_float
+texport_bin 0x80011800 tmp/test_float 0x800116b0
