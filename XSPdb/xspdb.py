@@ -110,7 +110,7 @@ def dasm_bytes(bytes_data, address):
             if full_instr is not None:
                 full_instr += c_instr
                 instrs_todecode.append((int.from_bytes(full_instr, byteorder='little', signed=False),
-                                        full_instr.hex(), i-2 + address))
+                                        full_instr[::-1].hex(), i-2 + address))
                 full_instr = None
                 continue
             # Is full 32 bit instr
@@ -119,7 +119,7 @@ def dasm_bytes(bytes_data, address):
                 continue
             # Is compressed 16 instr
             instrs_todecode.append((int.from_bytes(c_instr, byteorder='little', signed=False),
-                                    c_instr.hex(), i + address))
+                                    c_instr[::-1].hex(), i + address))
         import subprocess
         result_asm = []
         # For every 1000 instrs, call spike-dasm
@@ -149,7 +149,7 @@ def dasm_bytes(bytes_data, address):
     md.skipdata_setup = (".byte", None, None)
     asm_data = []
     for instr in md.disasm(bytes_data, address):
-        asm_data.append((instr.address, instr.bytes.hex(), instr.mnemonic, instr.op_str))
+        asm_data.append((instr.address, instr.bytes[::-1].hex(), instr.mnemonic, instr.op_str))
     return asm_data
 
 
