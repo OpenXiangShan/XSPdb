@@ -906,6 +906,7 @@ class XSPdb(pdb.Pdb):
             address = int(params[0], 0)
             self.api_write_bytes(address, self.api_convert_uint64_bytes(params[1]))
             self.mem_inited = True
+            self.info_cache_asm.clear()
         except Exception as e:
             error(f"convert {params[0]} to number fail: {str(e)}")
 
@@ -1330,6 +1331,7 @@ class XSPdb(pdb.Pdb):
             self.df.InitRam(bin_file, self.mem_size)
             self.mem_inited = True
         self.exec_bin_file = bin_file
+        self.info_cache_asm.clear()
 
     def api_export_flash(self, bin_file):
         """Export Flash data
@@ -1441,6 +1443,7 @@ class XSPdb(pdb.Pdb):
         self.df.flash_finish()
         self.df.InitFlash(flash_file)
         self.flash_bin_file = flash_file
+        self.info_cache_asm.clear()
 
     def api_dut_reset_flash(self):
         self.df.flash_finish()
