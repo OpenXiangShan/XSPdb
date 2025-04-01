@@ -818,6 +818,49 @@ class XSPdb(pdb.Pdb):
         except Exception as e:
             error(f"convert {arg} to bytes fail: {str(e)}")
 
+    def do_xdecode_instr32(self, arg):
+        """Decode a binary instruction
+
+        Args:
+            arg (int or bytes): Instruction data
+        """
+        arg = arg.strip()
+        if not arg:
+            error("dasm_instr <instr>")
+            return
+        try:
+            if not arg.startswith("b'"):
+                arg = int(arg, 0)
+            else:
+                arg = eval(arg)
+            message(str(self.api_decode_instr32(arg)))
+        except Exception as e:
+            error(f"decode {arg} fail: {str(e)}")
+
+    def do_xencode_instr32(self, arg):
+        """Encode a binary instruction
+
+        Args:
+            arg (dict): Instruction item data
+        """
+        arg = arg.strip()
+        if not arg:
+            error('encode_instr \{"instr": "<instr>","imm": <imm>,"rs1": <rs1>,"rs2": <rs2>,"rd": <rd>}')
+            return
+        try:
+            arg = eval(arg)
+            assert isinstance(arg, dict), "arg must be a dict"
+            instr = self.api_encode_instr32(arg)
+            instr_bytes = instr.to_bytes(4, byteorder="little", signed=False)
+            try:
+                instr_asm   = self.api_dasm_from_bytes(instr_bytes, 0)[0][2]
+            except Exception as e:
+                instr_asm = "unknown"
+            instr_btext = "\\x".join([f"{i:02x}" for i in instr_bytes])
+            message(f'asm: {instr_asm}  hex: 0x{instr:04x}    bytes: b\'{instr_btext}\'')
+        except Exception as e:
+            error(f"encode {arg} fail: {str(e)}")
+
     def do_xparse_instr_file(self, arg):
         """Parse uint64 strings
 
@@ -1587,6 +1630,134 @@ class XSPdb(pdb.Pdb):
                 line = ("norm_red", line)
             asm_lines.append(line)
         return asm_lines
+
+    def api_decode_instr32(self, instr):
+        """Decode a RISC-V instruction into its components.
+
+        Args:
+            instr: 32-bit integer representing the instruction
+
+        Returns:
+            Dictionary containing decoded instruction fields:
+            {
+                'type': str,   # Instruction type (R/I/S/B/U/J)
+                'opcode': int, # 7-bit opcode
+                'rd': int,     # Destination register (5 bits)
+                'rs1': int,    # Source register 1 (5 bits)
+                'rs2': int,    # Source register 2 (5 bits)
+                'funct3': int, # 3-bit function code
+                'funct7': int, # 7-bit function code
+                'imm': int     # Immediate value (signed)
+                'asm': str     # Assembly representation of the instruction
+            }
+        """
+        if isinstance(instr, bytes):
+            instr = int.from_bytes(instr, byteorder='little', signed=False)
+        assert isinstance(instr, int), "instr must be a 32-bit integer or bytes"
+        # Extract common fields
+        opcode = instr & 0x7f
+        rd = (instr >> 7) & 0x1f
+        funct3 = (instr >> 12) & 0x7
+        rs1 = (instr >> 15) & 0x1f
+        rs2 = (instr >> 20) & 0x1f
+        funct7 = (instr >> 25) & 0x7f
+
+        # Determine instruction type
+        instr_type = None
+        imm = 0
+
+        # Immediate handling for different formats
+        if opcode in [0x37, 0x17]:  # U-type (LUI/AUIPC)
+            instr_type = 'U'
+            imm = (instr & 0xfffff000)
+        elif opcode == 0x6f:        # J-type (JAL)
+            instr_type = 'J'
+            imm = ((instr >> 31) & 0x1) << 20
+            imm |= ((instr >> 21) & 0x3ff) << 1
+            imm |= ((instr >> 20) & 0x1) << 11
+            imm |= ((instr >> 12) & 0xff) << 12
+            imm = (imm << 11) >> 11  # Sign extend
+        elif opcode in [0x67, 0x03, 0x13, 0x1b]:  # I-type
+            instr_type = 'I'
+            imm = (instr >> 20) & 0xfff
+            if imm & 0x800:  # Sign extend
+                imm |= 0xfffff000
+        elif opcode == 0x63:        # B-type
+            instr_type = 'B'
+            imm = ((instr >> 31) & 0x1) << 12
+            imm |= ((instr >> 25) & 0x3f) << 5
+            imm |= ((instr >> 8) & 0xf) << 1
+            imm |= ((instr >> 7) & 0x1) << 11
+            imm = (imm << 19) >> 19  # Sign extend
+        elif opcode == 0x23:        # S-type
+            instr_type = 'S'
+            imm = ((instr >> 25) & 0x7f) << 5
+            imm |= (instr >> 7) & 0x1f
+            if imm & 0x800:  # Sign extend
+                imm |= 0xfffff000
+        elif opcode == 0x33:        # R-type
+            instr_type = 'R'
+        else:
+            instr_type = 'unknown'
+        try:
+            instr_asm   = self.api_dasm_from_bytes(instr.to_bytes(4, byteorder="little", signed=False), 0)[0][2]
+        except Exception as e:
+            instr_asm = f"unknown"
+        return {
+            'type': instr_type,
+            'opcode': opcode,
+            'rd': rd,
+            'rs1': rs1,
+            'rs2': rs2,
+            'funct3': funct3,
+            'funct7': funct7,
+            'imm': imm,
+            "asm": instr_asm
+        }
+
+    def api_encode_instr32(self, fields):
+        """Encode instruction fields back into machine code.
+
+        Args:
+            fields: Dictionary containing instruction fields
+
+        Returns:
+            32-bit integer representions(int, bytes, asm) of the instruction
+        """
+        instr = 0
+        opcode = fields['opcode']
+        instr_type = fields['type']
+
+        # Common fields
+        instr |= (opcode & 0x7f)
+        instr |= (fields['rd'] & 0x1f) << 7
+        instr |= (fields['funct3'] & 0x7) << 12
+        instr |= (fields['rs1'] & 0x1f) << 15
+        instr |= (fields['rs2'] & 0x1f) << 20
+        instr |= (fields['funct7'] & 0x7f) << 25
+
+        # Immediate handling
+        imm = fields.get('imm', 0)
+        if instr_type == 'U':
+            instr |= (imm & 0xfffff000)
+        elif instr_type == 'J':
+            imm_enc = (imm & 0x100000) >> 20
+            imm_enc |= (imm & 0x3ff) << 21
+            imm_enc |= (imm & 0x800) >> 1
+            imm_enc |= (imm & 0x7ff000) >> 12
+            instr |= imm_enc << 12
+        elif instr_type == 'I':
+            instr |= (imm & 0xfff) << 20
+        elif instr_type == 'B':
+            imm_enc = (imm & 0x1000) << 19
+            imm_enc |= (imm & 0x7e0) << 20
+            imm_enc |= (imm & 0x1e) << 7
+            imm_enc |= (imm & 0x800) >> 4
+            instr |= imm_enc
+        elif instr_type == 'S':
+            instr |= ((imm & 0xfe0) << 20) | ((imm & 0x1f) << 7)
+
+        return instr & 0xffffffff  # Ensure 32-bit
 
     def get_abs_info(self, size):
         """Get the current status summary information, such as general-purpose registers
