@@ -513,7 +513,7 @@ class XSPdb(pdb.Pdb):
         for i in range(instr_count):
             self.api_step_dut(10000)
             update_pc_func()
-            if self.api_is_hit_good_trap(show_log=False):
+            if self.api_is_hit_good_trap():
                 break
         # remove stepi_check
         self.dut.xclock.RemoveStepRisCbByDesc(cb_key)
@@ -1603,7 +1603,7 @@ class XSPdb(pdb.Pdb):
                              for i in range(32)])
         abs_list += [ireg_map()]
         # Float regs
-        abs_list += ["FloatReg:"]
+        abs_list += ["\nFloatReg:"]
         def freg_map():
             return " ".join(["%3s: 0x%x" % (self.fregs[i],
                                             self.xsp.GetFromU64Array(self.difftest_stat.regs_fp.value, i))
@@ -1668,9 +1668,10 @@ class XSPdb(pdb.Pdb):
                 else:
                     abs_list += [f"{pc}: {checked}"]
 
-        if self.api_is_hit_good_trap(show_log=True):
+        if self.api_is_hit_good_trap():
+            abs_list += ["\nProgram:"]
             abs_list += [("success_green", "HIT GOOD TRAP")]
 
         # TBD
-        abs_list += [("error_red", "\nFIXME:\nMore Data to be done\n")]
+        # abs_list += [("error_red", "\nFIXME:\nMore Data to be done\n")]
         return abs_list
