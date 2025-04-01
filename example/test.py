@@ -9,7 +9,8 @@ def handle_sigint(signum, frame):
 signal.signal(signal.SIGINT, handle_sigint)
 
 def test_sim_top():
-    XSPdb(DUTSimTop(), df, xsp).set_trace()
+    dut = DUTSimTop()
+    XSPdb(dut, df, xsp).set_trace()
     while True:
         dut.Step(1000)
 
