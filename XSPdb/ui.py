@@ -22,7 +22,7 @@ class XiangShanSimpleTUI:
         self.console_input_busy_index = -1
         self.console_default_txt = "\n\n\n\n"
         self.console_outbuffer = self.console_default_txt;
-        self.console_output = urwid.Text(self.console_outbuffer)
+        self.console_output = ANSIText(self.console_outbuffer)
         self.console_max_height = console_max_height
         self.content_asm_fix_width = content_asm_fix_width
         self.cmd_history = []
@@ -345,7 +345,24 @@ palette = [
     ('error_red',      'light red',   'black'),
     ('body',           'white',       'black'),
     ('divider',        'white',       'black'),
-    ('border',         'white',       'black')
+    ('border',         'white',       'black'),
+    # Add ANSI color mappings
+    ('black',          'black',       'black'),
+    ('dark red',       'dark red',    'black'),
+    ('dark green',     'dark green',  'black'),
+    ('brown',          'brown',       'black'),
+    ('dark blue',      'dark blue',   'black'),
+    ('dark magenta',   'dark magenta','black'),
+    ('dark cyan',      'dark cyan',   'black'),
+    ('light gray',     'light gray',  'black'),
+    ('dark gray',      'dark gray',   'black'),
+    ('light red',      'light red',   'black'),
+    ('light green',    'light green', 'black'),
+    ('yellow',         'yellow',      'black'),
+    ('light blue',     'light blue',  'black'),
+    ('light magenta',  'light magenta','black'),
+    ('light cyan',     'light cyan',  'black'),
+    ('white',          'white',       'black'),
 ]
 
 
@@ -367,3 +384,75 @@ def enter_simple_tui(pdb):
     signal.signal(signal.SIGINT, _sigint_handler)
     loop.run()
     signal.signal(signal.SIGINT, original_sigint)
+
+import re
+class ANSIText(urwid.Text):
+    """
+    A subclass of urwid.Text that supports ANSI color codes.
+    """
+    ANSI_COLOR_MAP = {
+        '30': 'black',
+        '31': 'dark red',
+        '32': 'dark green',
+        '33': 'brown',
+        '34': 'dark blue',
+        '35': 'dark magenta',
+        '36': 'dark cyan',
+        '37': 'light gray',
+        '90': 'dark gray',
+        '91': 'light red',
+        '92': 'light green',
+        '93': 'yellow',
+        '94': 'light blue',
+        '95': 'light magenta',
+        '96': 'light cyan',
+        '97': 'white',
+    }
+
+    ANSI_ESCAPE_RE = re.compile(r'\x1b\[(\d+)(;\d+)*m')
+
+    def __init__(self, text='', align='left'):
+        super().__init__('', align)
+        self.set_text(text)
+
+    def set_text(self, text):
+        """
+        Parse the ANSI text and set it with urwid attributes.
+        """
+        parsed_text = self._parse_ansi(text)
+        super().set_text(parsed_text)
+
+    def _parse_ansi(self, text):
+        """
+        Parse ANSI escape sequences and convert them to urwid attributes.
+        """
+        segments = []
+        current_attr = None
+        pos = 0
+
+        for match in self.ANSI_ESCAPE_RE.finditer(text):
+            start, end = match.span()
+            if start > pos:
+                segments.append((current_attr, text[pos:start]))
+            ansi_codes = match.group(0)
+            current_attr = self._ansi_to_attr(ansi_codes)
+            pos = end
+
+        if pos < len(text):
+            segments.append((current_attr, text[pos:]))
+
+        return segments
+
+    def _ansi_to_attr(self, ansi_code):
+        """
+        Convert ANSI escape codes to urwid attributes.
+        """
+        codes = ansi_code[2:-1].split(';')
+        if len(codes) == 0:
+            return None  # Reset attributes
+
+        fg_code = codes[0]
+        fg_color = self.ANSI_COLOR_MAP.get(fg_code, None)
+        if fg_color:
+            return fg_color
+        return None
