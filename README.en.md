@@ -4,6 +4,13 @@
 
 XSPdb is a specialized Python pdb-based debugging tool for RISC-V IP cores, customized for Xiangshan's difftest interface. It provides GDB-like interactive debugging capabilities, integrating: Terminal command-line interface, RTL-level waveform toggling, Automated script replay, System snapshot save/restore, Register initialization configuration, Instruction set disassembly, etc. Advanced debugging features: conditional breakpoints, real-time watchpoints, register/memory visualization, Hardware signal-level debugging interface synchronized with software execution states. It is a Hardware/software co-verification solution for RISC-V IPs.
 
+
+<div align="center">
+<img src="/.github/screenshot.png" alt="screenshot" width="800" />
+<br>
+Screenshot of the XSPdb
+</div>
+
 ### Installation & Dependencies
 
 Clone repository and install dependencies:
