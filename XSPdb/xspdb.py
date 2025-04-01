@@ -12,7 +12,9 @@ def message(*a, **k):
 
 def info(msg):
     """Print information"""
-    print("[Info] %s" % msg)
+    RESET = "\033[0m"
+    GREEN = "\033[32m"
+    print(f"{GREEN}[Info] %s{RESET}" % msg)
 
 def debug(msg):
     """Print debug information"""
@@ -20,11 +22,15 @@ def debug(msg):
 
 def error(msg):
     """Print error information"""
-    print("[Error] %s" % msg)
+    RESET = "\033[0m"
+    RED = "\033[31m"
+    print(f"{RED}[Error] %s{RESET}" % msg)
 
 def warn(msg):
     """Print warning information"""
-    print("[Warn] %s" % msg)
+    RESET = "\033[0m"
+    YELLOW = "\033[33m"
+    print(f"{YELLOW}[Warn] %s{RESET}" % msg)
 
 def build_prefix_tree(signals):
     tree = {}
@@ -332,7 +338,7 @@ class XSPdb(pdb.Pdb):
         if not os.path.exists(arg):
             error(f"{arg} not found")
             return
-        assert "Please call this function in TUI"
+        error("Please call this function in TUI")
 
     def complete_xload_script(self, text, line, begidx, endidx):
         return self.api_complite_localfile(text)
@@ -846,6 +852,7 @@ class XSPdb(pdb.Pdb):
         try:
             address = int(params[0], 0)
             self.api_write_bytes(address, self.api_convert_uint64_bytes(params[1]))
+            self.mem_inited = True
         except Exception as e:
             error(f"convert {params[0]} to number fail: {str(e)}")
 
@@ -1368,7 +1375,7 @@ class XSPdb(pdb.Pdb):
             f.write(bin_data)
             for index in range(last_indx, end_index):
                 f.write(self.df.pmem_read(index*8 + mem_base).to_bytes(8, byteorder='little', signed=False))
-        info(f"export {8*(last_indx - end_index) + len(bin_data)} bytes to unified bin file: {bin_file}")
+        info(f"export {8*(end_index - last_indx) + len(bin_data)} bytes to unified bin file: {bin_file}")
         return True
 
     def api_dut_flash_load(self, flash_file):
