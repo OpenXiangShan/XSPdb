@@ -818,7 +818,7 @@ class XSPdb(pdb.Pdb):
         except Exception as e:
             error(f"convert {arg} to bytes fail: {str(e)}")
 
-    def do_xdecode_instr32(self, arg):
+    def do_xdecode_instr(self, arg):
         """Decode a binary instruction
 
         Args:
@@ -829,15 +829,21 @@ class XSPdb(pdb.Pdb):
             error("dasm_instr <instr>")
             return
         try:
+            is_compressed = False
             if not arg.startswith("b'"):
                 arg = int(arg, 0)
+                if arg & 0x3 == 0x3:
+                    is_compressed = True
             else:
                 arg = eval(arg)
-            message(str(self.api_decode_instr32(arg)))
+                if len(arg) == 2:
+                    is_compressed = True
+            value = self.api_decode_instr16(arg) if is_compressed else self.api_decode_instr32(arg)
+            message(str(value))
         except Exception as e:
             error(f"decode {arg} fail: {str(e)}")
 
-    def do_xencode_instr32(self, arg):
+    def do_xencode_instr(self, arg):
         """Encode a binary instruction
 
         Args:
@@ -850,8 +856,12 @@ class XSPdb(pdb.Pdb):
         try:
             arg = eval(arg)
             assert isinstance(arg, dict), "arg must be a dict"
-            instr = self.api_encode_instr32(arg)
-            instr_bytes = instr.to_bytes(4, byteorder="little", signed=False)
+            if arg.get("is_compressed"):
+                instr = self.api_encode_instr16(arg)
+                instr_bytes = instr.to_bytes(2, byteorder="little", signed=False)
+            else:
+                instr = self.api_encode_instr32(arg)
+                instr_bytes = instr.to_bytes(4, byteorder="little", signed=False)
             try:
                 instr_asm   = self.api_dasm_from_bytes(instr_bytes, 0)[0][2]
             except Exception as e:
@@ -1631,11 +1641,150 @@ class XSPdb(pdb.Pdb):
             asm_lines.append(line)
         return asm_lines
 
+    def api_decode_instr16(self, instr):
+        """Decode a RISC-V compressed (16-bit) instruction.
+
+        Args:
+            instr: 16-bit integer/bytes representing the compressed instruction
+
+        Returns:
+            Dictionary containing decoded fields:
+            {
+                'type': str,   # Instruction type (CR/CI/CIW/CL/CS/CA/CB/CJ)
+                'opcode': int, # Primary opcode (2 bits)
+                'funct3': int, # 3-bit function code
+                'rd': int,     # Destination register (normal or compressed)
+                'rs1': int,    # Source register 1 (normal or compressed)
+                'rs2': int,    # Source register 2 (normal or compressed)
+                'imm': int,    # Immediate value (signed)
+                'is_compressed': True
+                'asm': str,    # Assembly string
+            }
+        """
+        if isinstance(instr, bytes):
+            instr = int.from_bytes(instr, byteorder='little', signed=False)
+        # Convert to 16-bit unsigned
+        instr = instr & 0xffff
+        fields = {
+            'is_compressed': True,
+            'type': 'Unknown',
+            'opcode': (instr >> 13) & 0x3,  # Primary opcode (bits 15-13)
+            'funct3': (instr >> 13) & 0x7,   # For some instruction types
+            'rd': 0,
+            'rs1': 0,
+            'rs2': 0,
+            'imm': 0
+        }
+        # Helper to expand compressed register numbers
+        def expand_reg(compressed_reg):
+            return 8 + (compressed_reg & 0x7)
+        # Main decoding logic
+        op = fields['opcode']
+        if op == 0x0:  # CIW format (Quadrant 0)
+            fields['type'] = 'CIW'
+            fields['rd'] = expand_reg((instr >> 2) & 0x7)  # rd'
+            fields['imm'] = ((instr >> 5) & 0x3) << 3 | (instr >> 10) << 5
+            fields['imm'] = (fields['imm'] & 0x3f) << 2  # Zero-extended
+        elif op == 0x1:  # CI/CL format
+            funct3 = (instr >> 13) & 0x7
+            if funct3 in [0, 2, 6]:  # CI format
+                fields['type'] = 'CI'
+                fields['rd'] = expand_reg((instr >> 7) & 0x7)
+                imm = ((instr >> 12) & 0x1) << 5 | (instr >> 2) & 0x1f
+                if funct3 == 0:  # C.ADDI
+                    fields['imm'] = (imm << 26) >> 26  # Sign extend 6-bit
+                else:  # C.LI etc.
+                    fields['imm'] = imm
+            elif funct3 in [1, 3, 5, 7]:  # CL format
+                fields['type'] = 'CL'
+                fields['rd'] = expand_reg((instr >> 7) & 0x7)
+                fields['rs1'] = expand_reg((instr >> 10) & 0x7)
+                imm = ((instr >> 5) & 0x3) << 6 | (instr >> 10) & 0x7
+                imm = (imm << 25) >> 25  # Sign extend
+        elif op == 0x2:  # CR/CS/CB format
+            funct4 = (instr >> 12) & 0xf
+            if funct4 == 0x8:  # CR format
+                fields['type'] = 'CR'
+                fields['rd'] = (instr >> 7) & 0x1f
+                fields['rs1'] = (instr >> 7) & 0x1f
+                fields['rs2'] = (instr >> 2) & 0x1f
+            elif funct4 in [0x9, 0xa, 0xb]:  # CS format
+                fields['type'] = 'CS'
+                fields['rs1'] = expand_reg((instr >> 10) & 0x7)
+                fields['rs2'] = expand_reg((instr >> 7) & 0x7)
+                imm = (instr >> 2) & 0x1f
+                fields['imm'] = imm
+            else:  # CB format
+                fields['type'] = 'CB'
+                fields['rs1'] = expand_reg((instr >> 10) & 0x7)
+                imm = ((instr >> 12) & 0x1) << 8 | (instr >> 2) & 0x7 | (instr >> 7) & 0x18
+                imm = (imm << 23) >> 23  # Sign extend 9-bit
+                fields['imm'] = imm
+        elif op == 0x3:  # CJ format
+            fields['type'] = 'CJ'
+            imm = ((instr >> 12) & 0x1) << 11 | (instr >> 1) & 0x7ff
+            imm = (imm << 19) >> 19  # Sign extend 12-bit
+            fields['imm'] = imm
+        try:
+            fields['asm'] = self.api_dasm_from_bytes(instr.to_bytes(2, byteorder="little", signed=False), 0)[0][2]
+        except Exception as e:
+            fields['asm'] = f"unknown"
+        return fields
+
+    def api_encode_instr16(self, fields):
+        """
+        Encode compressed instruction fields back to 16-bit machine code.
+
+        Args:
+            fields: Dictionary containing decoded fields
+
+        Returns:
+            16-bit integer representing the compressed instruction
+        """
+        instr = 0
+        typ = fields['type']
+        # Common field handling
+        def compress_reg(reg):
+            return (reg - 8) & 0x7 if reg >= 8 else reg
+        if typ == 'CIW':
+            instr |= (0x0 << 13)
+            instr |= (compress_reg(fields['rd']) & 0x7) << 2
+            imm = (fields['imm'] >> 2) & 0x3f
+            instr |= (imm & 0x3) << 5 | (imm >> 3) << 10
+        elif typ == 'CI':
+            instr |= (0x1 << 13)
+            instr |= (fields['funct3'] & 0x7) << 13
+            instr |= (compress_reg(fields['rd']) & 0x7) << 7
+            imm = fields['imm'] & 0x3f
+            instr |= (imm & 0x1f) << 2 | (imm >> 5) << 12
+        elif typ == 'CL':
+            instr |= (0x1 << 13)
+            instr |= (fields['funct3'] & 0x7) << 13
+            instr |= (compress_reg(fields['rs1']) & 0x7) << 10
+            instr |= (compress_reg(fields['rd']) & 0x7) << 7
+            imm = fields['imm'] & 0x7f
+            instr |= (imm & 0x3) << 5 | (imm >> 2) << 10
+        elif typ == 'CR':
+            instr |= (0x2 << 13)
+            instr |= 0x8 << 12
+            instr |= (fields['rd'] & 0x1f) << 7
+            instr |= (fields['rs2'] & 0x1f) << 2
+        elif typ == 'CB':
+            instr |= (0x2 << 13)
+            imm = fields['imm'] & 0x1ff
+            instr |= (imm & 0x7) << 2 | (imm >> 3) << 7 | (imm >> 8) << 12
+            instr |= (compress_reg(fields['rs1']) & 0x7) << 10
+        elif typ == 'CJ':
+            instr |= (0x3 << 13)
+            imm = fields['imm'] & 0xfff
+            instr |= (imm & 0x7ff) << 1 | (imm >> 11) << 12
+        return instr & 0xffff
+
     def api_decode_instr32(self, instr):
         """Decode a RISC-V instruction into its components.
 
         Args:
-            instr: 32-bit integer representing the instruction
+            instr: 32-bit integer/bytes representing the instruction
 
         Returns:
             Dictionary containing decoded instruction fields:
