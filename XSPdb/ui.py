@@ -253,10 +253,10 @@ class XiangShanSimpleTUI:
         self.loop.draw_screen()
 
     def process_command(self, cmd):
-        if cmd.startswith("tload_script"):
+        if cmd.startswith("xload_script"):
             args = cmd.strip().split()
             if len(args) < 2:
-                self.console_output.set_text(self._get_output("Usage: tload_script <script_file> [gap_time]\n"))
+                self.console_output.set_text(self._get_output("Usage: xload_script <script_file> [gap_time]\n"))
                 return
             script_file = args[1]
             gap_time = 0
