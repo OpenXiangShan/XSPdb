@@ -513,6 +513,8 @@ class XSPdb(pdb.Pdb):
         for i in range(instr_count):
             self.api_step_dut(10000)
             update_pc_func()
+            if self.api_is_hit_good_trap(show_log=False):
+                break
         # remove stepi_check
         self.dut.xclock.RemoveStepRisCbByDesc(cb_key)
         assert cb_key not in self.dut.xclock.ListSteRisCbDesc()
@@ -1077,6 +1079,8 @@ class XSPdb(pdb.Pdb):
             fc = getattr(self, "on_update_tstep", None)
             if fc:
                 fc()
+            if self.api_is_hit_good_trap(show_log=True):
+                break
         if not self.interrupt and not self.dut.xclock.IsDisable():
             self.dut.Step(offset)
         self.dut.xclock.Enable()
@@ -1100,7 +1104,7 @@ class XSPdb(pdb.Pdb):
         Returns:
             list(int): Register values
         """
-        if not self.api_check_if_xspdb_init_bin_loaded(self):
+        if not self.api_check_if_xspdb_init_bin_loaded():
             return []
         base_offset = 8
         reg_index = self.mpc_iregs
@@ -1115,7 +1119,7 @@ class XSPdb(pdb.Pdb):
         Returns:
             list(int): Register values
         """
-        if not self.api_check_if_xspdb_init_bin_loaded(self):
+        if not self.api_check_if_xspdb_init_bin_loaded():
             return []
         base_offset = 8 + 32*8
         regs = []
@@ -1129,7 +1133,7 @@ class XSPdb(pdb.Pdb):
         Args:
             regs (list(float), dict): Register values
         """
-        if not self.api_check_if_xspdb_init_bin_loaded(self):
+        if not self.api_check_if_xspdb_init_bin_loaded():
             return
         base_offset = 8 + 32*8
         reg_map = {k: v for v, k in enumerate(self.fregs)}
@@ -1141,7 +1145,7 @@ class XSPdb(pdb.Pdb):
         Args:
             regs (list(int), dict): Register values
         """
-        if not self.api_check_if_xspdb_init_bin_loaded(self):
+        if not self.api_check_if_xspdb_init_bin_loaded():
             return
         base_offset = 8
         reg_index = self.mpc_iregs
@@ -1273,7 +1277,7 @@ class XSPdb(pdb.Pdb):
         Args:
             bin_file (string): Path to the export file
         """
-        if not self.api_check_if_xspdb_init_bin_loaded(self):
+        if not self.api_check_if_xspdb_init_bin_loaded():
             return
         # search mret
         mret = 0x30200073
@@ -1305,6 +1309,25 @@ class XSPdb(pdb.Pdb):
                 f.write(self.df.pmem_read(index).to_bytes(8, byteorder='little', signed=False))
         info(f"export {end_index - self.mem_base} bytes to ram file: {bin_file}")
 
+    def api_is_hit_good_trap(self, show_log=False):
+        """Check if the good trap is hit
+
+        Args:
+            show_log (bool): Whether to show the log
+        Returns:
+            bool: Whether the good trap is hit
+        """
+        RESET = "\033[0m"
+        GREEN = "\033[32m"
+        for i in range(8):
+            cmt = self.difftest_stat.get_commit(i)
+            if cmt and cmt.valid:
+                if cmt.instr == 0x6f:
+                    if show_log:
+                        message(f"{GREEN}HIT GOOF TRAP at pc = 0x{cmt.pc:x}{RESET}")
+                    return True
+        return False
+
     def api_export_unified_bin(self, ram_start, ram_end, bin_file):
         """Export a unified bin file
 
@@ -1316,7 +1339,7 @@ class XSPdb(pdb.Pdb):
         if not self.mem_inited:
             error("mem not loaded")
             return False
-        if not self.api_check_if_xspdb_init_bin_loaded(self):
+        if not self.api_check_if_xspdb_init_bin_loaded():
             return False
         # read flash data
         mret = 0x30200073
@@ -1644,6 +1667,9 @@ class XSPdb(pdb.Pdb):
                     abs_list += [("error_red", f"{pc}: {checked}")]
                 else:
                     abs_list += [f"{pc}: {checked}"]
+
+        if self.api_is_hit_good_trap(show_log=True):
+            abs_list += [("success_green", "HIT GOOD TRAP")]
 
         # TBD
         abs_list += [("error_red", "\nFIXME:\nMore Data to be done\n")]
