@@ -1324,7 +1324,7 @@ class XSPdb(pdb.Pdb):
             if cmt and cmt.valid:
                 if cmt.instr == 0x6f:
                     if show_log:
-                        message(f"{GREEN}HIT GOOF TRAP at pc = 0x{cmt.pc:x}{RESET}")
+                        message(f"{GREEN}HIT GOOD TRAP at pc = 0x{cmt.pc:x}{RESET}")
                     return True
         return False
 
