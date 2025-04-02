@@ -5,32 +5,46 @@ import bisect
 from .ui import enter_simple_tui
 from collections import OrderedDict
 import os
+import logging
+
+# Initialize logger
+xlogger = logging.getLogger("XSPdbLogger")
+fm = logging.Formatter("[%(asctime)s] [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+fh = logging.FileHandler("XSPdb.log")
+fh.setFormatter(fm)
+xlogger.addHandler(fh)
+xlogger.setLevel(logging.DEBUG)
+
 
 def message(*a, **k):
     """Print a message"""
     print(*a, **k)
 
-def info(msg):
+def info(msg,logger=None):
     """Print information"""
     RESET = "\033[0m"
     GREEN = "\033[32m"
     print(f"{GREEN}[Info] %s{RESET}" % msg)
+    xlogger.info(f"{msg}")
 
-def debug(msg):
+def debug(msg,logger=None):
     """Print debug information"""
     print("[Debug] %s" % msg)
+    xlogger.debug(f"{msg}")
 
-def error(msg):
+def error(msg,logger=None):
     """Print error information"""
     RESET = "\033[0m"
     RED = "\033[31m"
     print(f"{RED}[Error] %s{RESET}" % msg)
+    xlogger.error(f"{msg}")
 
-def warn(msg):
+def warn(msg,logger=None):
     """Print warning information"""
     RESET = "\033[0m"
     YELLOW = "\033[33m"
     print(f"{YELLOW}[Warn] %s{RESET}" % msg)
+    xlogger.warning(f"{msg}")
 
 def build_prefix_tree(signals):
     tree = {}
@@ -212,6 +226,11 @@ class XSPdb(pdb.Pdb):
                       "s8",   "s9", "s10","s11", "t3", "t4", "t5", "t6"]
         self.mpc_iregs = self.iregs.copy()
         self.mpc_iregs[0] = "mpc"
+
+    #overload the default onecmd
+    def onecmd(self, line):
+        xlogger.debug(f"onecmd: {line}")
+        return super().onecmd(line)
 
     # Custom PDB commands and corresponding auto-completion methods
     # do_XXX is the implementation of the command, complete_XXX is the implementation of auto-completion

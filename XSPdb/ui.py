@@ -71,7 +71,7 @@ class XiangShanSimpleTUI:
         self.update_asm_abs_info()
         # Note: need to update console output in the end
         self._handle_stdout_error()
-        self.console_output.set_text(self._get_output("Tips: \n  Press Esc button to exit tui. \n  Ctrl+up/down/left/right to adjust the panels.\n"))
+        self.console_output.set_text(self._get_output("Tips: \n  Press Esc button to exit xui. \n  Ctrl+up/down/left/right to adjust the panels.\n"))
 
     def update_top_pane(self):
         """
