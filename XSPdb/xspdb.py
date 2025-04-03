@@ -233,17 +233,7 @@ class XSPdb(pdb.Pdb):
 
     #overload the default onecmd
     def onecmd(self, line):
-        #silent stream handler
-        for handler in xlogger.handlers:
-            if not isinstance(handler, logging.FileHandler):
-                handler.setLevel(logging.CRITICAL)
-
         xlogger.debug(f"------onecmd: {line}")
-
-        #enable stream handler
-        for handler in xlogger.handlers:
-            if not isinstance(handler, logging.FileHandler):
-                handler.setLevel(logging.DEBUG)
         return super().onecmd(line)
 
     # Custom PDB commands and corresponding auto-completion methods
