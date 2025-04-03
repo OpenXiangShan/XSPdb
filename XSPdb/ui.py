@@ -11,7 +11,7 @@ except ImportError:
     urwid = None
 
 
-class XiangShanSimpleTUI:
+class XiangShanSimpleXUI:
     def __init__(self, pdb, console_max_height=10, content_asm_fix_width=55, console_prefix="(xiangshan)"):
         self.asm_content = urwid.SimpleListWalker([])
         self.summary_info = urwid.SimpleListWalker([])
@@ -276,10 +276,34 @@ class XiangShanSimpleTUI:
                         continue
                     self.process_command(line)
                     time.sleep(gap_time)
+
+        elif cmd.startswith("xload_log"):
+            args = cmd.strip().split()
+            if len(args) < 2:
+                self.console_output.set_text(self._get_output("Usage: xload_log <log_file> [gap_time]\n"))
+                return
+            log_file = args[1]
+            gap_time = 0
+            if len(args) > 2:
+                gap_time = float(args[2])
+            if not os.path.exists(log_file):
+                self.console_output.set_text(self._get_output(f"Error: Log file {log_file} not found.\n"))
+                return
+            with open(log_file, "r") as f:
+                for line in f.readlines():
+                    
+                    line = line[line.find(']')+1:].strip()
+                    
+                    if not line.startswith("------onecmd:"):
+                        continue
+                    line = line.split("------onecmd:")[1].strip()
+                    self.process_command(line)
+                    time.sleep(gap_time)
+
         elif cmd == "clear":
             self.console_output.set_text(self._get_output(self.console_default_txt, clear=True))
         elif cmd in ["continue", "c", "count"]:
-            self.console_output.set_text(self._get_output("continue/c/count is not supported in TUI\n"))
+            self.console_output.set_text(self._get_output("continue/c/count is not supported in XUI\n"))
         else:
             self.console_output.set_text(self._get_output(cmd + "\n"))
             cap = self.console_input.caption
@@ -366,11 +390,11 @@ palette = [
 ]
 
 
-def enter_simple_tui(pdb):
+def enter_simple_xui(pdb):
     if urwid is None:
         print("urwid not found, please install urwid first.")
         return
-    app = XiangShanSimpleTUI(pdb)
+    app = XiangShanSimpleXUI(pdb)
     loop = urwid.MainLoop(
         app.root,
         palette=palette,
