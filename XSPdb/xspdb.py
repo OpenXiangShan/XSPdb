@@ -945,7 +945,7 @@ class XSPdb(pdb.Pdb):
         """
         arg = arg.strip()
         if not arg:
-            error('encode_instr \{"instr": "<instr>","imm": <imm>,"rs1": <rs1>,"rs2": <rs2>,"rd": <rd>}')
+            error('Usage: xencode_instr {"instr": "<instr>", "imm": <imm>, "rs1": <rs1>, "rs2": <rs2>, "rd": <rd>}')
             return
         try:
             arg = eval(arg)

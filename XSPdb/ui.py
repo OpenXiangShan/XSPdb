@@ -356,7 +356,7 @@ class XiangShanSimpleXUI:
             clear_success = True
         except Exception as e:
             import traceback
-            self.console_output.set_text(self._get_output("%s\n\%sn"%(str(e),
+            self.console_output.set_text(self._get_output("%s\n%s\n"%(str(e),
                                          traceback.format_exc())))
             self.exit_error = e
         if clear_success:
