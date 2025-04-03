@@ -2,34 +2,52 @@
 
 import pdb
 import bisect
-from .ui import enter_simple_tui
+from .ui import enter_simple_xui
 from collections import OrderedDict
 import os
+import logging
+
+# Initialize global logger
+xlogger = logging.getLogger("XSPdbLogger")
+xlogger.setLevel(logging.DEBUG)
+file_format = logging.Formatter("[%(asctime)s] %(message)s ", datefmt="%Y-%m-%d %H:%M:%S")
+stream_format = logging.Formatter("%(message)s")
+#defalt logging file handler
+fh = logging.FileHandler("XSPdb.log")
+fh.setFormatter(file_format)
+xlogger.addHandler(fh)
+
 
 def message(*a, **k):
     """Print a message"""
+    xlogger.debug(f"{a} {k}")
     print(*a, **k)
 
 def info(msg):
     """Print information"""
     RESET = "\033[0m"
     GREEN = "\033[32m"
+    xlogger.info(f"[Info] %s" % msg)
     print(f"{GREEN}[Info] %s{RESET}" % msg)
 
 def debug(msg):
     """Print debug information"""
-    print("[Debug] %s" % msg)
+    xlogger.debug("[Debug] %s" % msg)
+    print(f"[Debug] %s" % msg)
+    
 
 def error(msg):
     """Print error information"""
     RESET = "\033[0m"
     RED = "\033[31m"
+    xlogger.error(f"[Error] %s" % msg)
     print(f"{RED}[Error] %s{RESET}" % msg)
 
 def warn(msg):
     """Print warning information"""
     RESET = "\033[0m"
     YELLOW = "\033[33m"
+    xlogger.warning(f"[Warn] %s" % msg)
     print(f"{YELLOW}[Warn] %s{RESET}" % msg)
 
 def build_prefix_tree(signals):
@@ -174,7 +192,7 @@ class XSPdb(pdb.Pdb):
         self.flash_base = flash_base
         self.dut_tree = build_prefix_tree(dut.GetInternalSignalList())
         self.prompt = "(XiangShan) "
-        self.in_tui = False
+        self.in_xui = False
         self.interrupt = False
         self.info_cache_asm = {}
         self.info_cache_bsz = 256
@@ -213,8 +231,57 @@ class XSPdb(pdb.Pdb):
         self.mpc_iregs = self.iregs.copy()
         self.mpc_iregs[0] = "mpc"
 
+    #overload the default onecmd
+    def onecmd(self, line):
+        xlogger.debug(f"------onecmd: {line}")
+        return super().onecmd(line)
+
     # Custom PDB commands and corresponding auto-completion methods
     # do_XXX is the implementation of the command, complete_XXX is the implementation of auto-completion
+    def do_xset_log(self, arg):
+        """Set the log on or off
+        
+        Args:
+            arg (string): "on" or "off"
+        """
+        if arg == "on":
+            for handler in xlogger.handlers:
+                if isinstance(handler,logging.FileHandler):
+                    handler.setLevel(logging.DEBUG)
+            info("log on")
+        elif arg == "off":
+            for handler in xlogger.handlers:
+                if isinstance(handler,logging.FileHandler):
+                    handler.setLevel(logging.CRITICAL)
+            info("log off")
+        else:
+            message("usage: xset_log <on|off>")
+
+    def do_xset_log_file(self, arg):
+        """Set the log file path
+        
+        Args:
+            arg (string): Path to the log file
+        """
+        if not arg:
+            message("usage: xset_log_file <log_file>")
+            return
+        
+        # Expand ~ to the user's home directory
+        log_file_path = os.path.expanduser(arg)
+        
+        # Remove existing FileHandler
+        for handler in xlogger.handlers:
+            if isinstance(handler, logging.FileHandler):
+                handler.close()
+                xlogger.removeHandler(handler)
+        
+        # Add new FileHandler
+        fh = logging.FileHandler(log_file_path)
+        fh.setFormatter(file_format)
+        xlogger.addHandler(fh)
+        message("log file set to %s" % log_file_path)
+
     def do_xload(self, arg):
         """Load a binary file into memory
 
@@ -325,6 +392,23 @@ class XSPdb(pdb.Pdb):
 
     def complete_xflash(self, text, line, begidx, endidx):
         return self.api_complite_localfile(text)
+    
+    def do_xload_log(self, arg):
+        """Load a log file
+
+        Args:
+            arg (string): Path to the log file
+        """
+        if not arg:
+            message("usage: xload_log <log_file>")
+            return
+        if not os.path.exists(arg):
+            error(f"{arg} not found")
+            return
+        error("Please call this function in XUI")
+    
+    def complete_xload_log(self, text, line, begidx, endidx):
+        return self.api_complite_localfile(text)
 
     def do_xload_script(self, arg):
         """Load an XSPdb script
@@ -338,7 +422,7 @@ class XSPdb(pdb.Pdb):
         if not os.path.exists(arg):
             error(f"{arg} not found")
             return
-        error("Please call this function in TUI")
+        error("Please call this function in XUI")
 
     def complete_xload_script(self, text, line, begidx, endidx):
         return self.api_complite_localfile(text)
@@ -687,12 +771,12 @@ class XSPdb(pdb.Pdb):
         Args:
             arg (None): No arguments
         """
-        if self.in_tui:
-            error("Already in TUI")
+        if self.in_xui:
+            error("Already in xui")
             return
-        self.in_tui = True
-        enter_simple_tui(self)
-        self.in_tui = False
+        self.in_xui = True
+        enter_simple_xui(self)
+        self.in_xui = False
         self.on_update_tstep = None
         self.interrupt = False
         info("XUI Exited.")
@@ -851,7 +935,7 @@ class XSPdb(pdb.Pdb):
         """
         arg = arg.strip()
         if not arg:
-            error('encode_instr \{"instr": "<instr>","imm": <imm>,"rs1": <rs1>,"rs2": <rs2>,"rd": <rd>}')
+            error('Usage: xencode_instr {"instr": "<instr>", "imm": <imm>, "rs1": <rs1>, "rs2": <rs2>, "rd": <rd>}')
             return
         try:
             arg = eval(arg)
@@ -1082,7 +1166,7 @@ class XSPdb(pdb.Pdb):
             message(f"x{i}: {r}", end=" ")
         message("")
 
-    # Custom APIs for PDB commands and TUI interface
+    # Custom APIs for PDB commands and XUI interface
     # All APIs start with get_ or api_
     def get_commit_pc_list(self):
         """Get the list of all commit PCs
