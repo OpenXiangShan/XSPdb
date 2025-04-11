@@ -6,13 +6,14 @@ from .ui import enter_simple_xui
 from collections import OrderedDict
 import os
 import logging
+import re
 
 # Initialize global logger
 xlogger = logging.getLogger("XSPdbLogger")
 xlogger.setLevel(logging.DEBUG)
 file_format = logging.Formatter("[%(asctime)s] %(message)s ", datefmt="%Y-%m-%d %H:%M:%S")
 stream_format = logging.Formatter("%(message)s")
-#defalt logging file handler
+#default logging file handler
 fh = logging.FileHandler("XSPdb.log")
 fh.setFormatter(file_format)
 xlogger.addHandler(fh)
@@ -520,6 +521,7 @@ class XSPdb(pdb.Pdb):
         sig = self.dut.GetInternalSignal(arg)
         if sig:
             message(f"value: {hex(sig.value)}  width: {sig.W()}")
+
 
     def complete_xprint(self, text, line, begidx, endidx):
         cmp = get_completions(self.dut_tree, text)
@@ -1165,6 +1167,31 @@ class XSPdb(pdb.Pdb):
         for i, r in enumerate(self.fregs):
             message(f"x{i}: {r}", end=" ")
         message("")
+    def do_xmem_read(self,arg):
+        """read the contents in memory 
+        
+        Args:
+            arg(string): address 
+        """
+        if not arg:
+            message("usage: xmem_read <address>")
+            return
+        args = arg.strip().split()
+        try:
+            address = int(args[0], 0)
+        except Exception as e:
+            error(f"convert {args[0]} to number fail: {str(e)}")
+            return
+        read_func = self.df.pmem_read if address > self.mem_base else self.df.FlashRead
+        offset = 0 if address > self.mem_base else self.flash_base
+        data = read_func(address-offset).to_bytes(8, byteorder="little", signed=False)[::-1]
+        data1 = data[4:8]
+        data2 = data[0:4]
+        message(f"0x{address:x}: {data1.hex()}\n0x{(address+4):x}: {data2.hex()}")
+        
+        
+        
+        
 
     # Custom APIs for PDB commands and XUI interface
     # All APIs start with get_ or api_
@@ -2089,3 +2116,28 @@ class XSPdb(pdb.Pdb):
         # TBD
         # abs_list += [("error_red", "\nFIXME:\nMore Data to be done\n")]
         return abs_list
+    def api_eval_expression(self,expression):
+        variable_pattern = r"\b[a-zA-Z_][a-zA-Z0-9_]*\b"
+        variables = re.findall(variable_pattern, expression)
+        for var in variables:
+            
+            if var in self.info_watch_list:
+                expression = re.sub(rf"\b{var}\b", str(self.info_watch_list[var].value), expression)
+            elif var in self.iregs:
+                expression = re.sub(rf"\b{var}\b", str(self.xsp.GetFromU64Array(self.difftest_stat.regs_int.value, self.iregs.index(var))), expression)
+            elif var in self.fregs:
+                expression = re.sub(rf"\b{var}\b", str(self.xsp.GetFromU64Array(self.difftest_stat.regs_fp.value, self.fregs.index(var))), expression)
+            else:
+                signal = self.dut.GetInternalSignal(var)
+                if signal:
+                    expression = re.sub(rf"\b{var}\b", str(signal.value), expression)
+                else:
+                    error(f"Variable {var} not found in input signals or registers")
+                    return None
+        try:
+            result = eval(expression,{"__builtins__": None}, {})
+        except Exception as e:
+            error(f"Error evaluating expression {expression}: {e}")
+            return None
+        return result
+

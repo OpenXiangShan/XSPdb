@@ -11,7 +11,7 @@ except ImportError:
     urwid = None
 
 
-class XiangShanSimpleXUI:
+class XiangShanSimpleTUI:
     def __init__(self, pdb, console_max_height=10, content_asm_fix_width=55, console_prefix="(xiangshan)"):
         self.asm_content = urwid.SimpleListWalker([])
         self.summary_info = urwid.SimpleListWalker([])
@@ -296,8 +296,10 @@ class XiangShanSimpleXUI:
                     
                     if not line.startswith("------onecmd:"):
                         continue
-                    line = line.split("------onecmd:")[1].strip()
-                    self.process_command(line)
+                    
+                    line = line.split("------onecmd:")[1].st1rip()
+                    if line:
+                        self.process_command(line)
                     time.sleep(gap_time)
 
         elif cmd == "clear":
@@ -394,7 +396,7 @@ def enter_simple_xui(pdb):
     if urwid is None:
         print("urwid not found, please install urwid first.")
         return
-    app = XiangShanSimpleXUI(pdb)
+    app = XiangShanSimpleTUI(pdb)
     loop = urwid.MainLoop(
         app.root,
         palette=palette,
