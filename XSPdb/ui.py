@@ -297,7 +297,7 @@ class XiangShanSimpleTUI:
                     if not line.startswith("------onecmd:"):
                         continue
                     
-                    line = line.split("------onecmd:")[1].st1rip()
+                    line = line.split("------onecmd:")[1].strip()
                     if line:
                         self.process_command(line)
                     time.sleep(gap_time)
