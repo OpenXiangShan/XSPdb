@@ -905,7 +905,6 @@ class XSPdb(pdb.Pdb):
         try:
             address = int(params[0], 0)
             self.api_write_bytes(address, self.api_convert_uint64_bytes(params[1]))
-            self.mem_inited = True
             self.info_cache_asm.clear()
         except Exception as e:
             error(f"convert {params[0]} to number fail: {str(e)}")
