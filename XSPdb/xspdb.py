@@ -642,7 +642,7 @@ class XSPdb(pdb.Pdb):
             a (None): No arguments
         """
         for p in self.get_commit_pc_list():
-            error("PC: 0x%x%s" % (p[0], "" if p[1] else "*"))
+            message("PC: 0x%x%s" % (p[0], "" if p[1] else "*"))
 
     def do_xexpdiffstate(self, var):
         """Set a variable to difftest_stat
