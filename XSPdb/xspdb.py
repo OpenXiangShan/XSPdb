@@ -1117,7 +1117,8 @@ class XSPdb(pdb.Pdb):
         fname = text
         if "/" in text:
             path, fname = text.rsplit("/", 1)
-        return [os.path.join(path, f) for f in os.listdir(path if path else ".") if f.startswith(fname)]
+        ret = [os.path.join(path, f) for f in os.listdir(path if path else ".") if f.startswith(fname)]
+        return [f + ("/" if os.path.isdir(f) else "") for f in ret]
 
     def api_step_dut(self, cycle, batch_cycle=200):
         """Step through the circuit
