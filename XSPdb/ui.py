@@ -71,7 +71,7 @@ class XiangShanSimpleTUI:
         self.update_asm_abs_info()
         # Note: need to update console output in the end
         self._handle_stdout_error()
-        self.console_output.set_text(self._get_output("Tips: \n  Press Esc button to exit xui. \n  Ctrl+up/down/left/right to adjust the panels.\n"))
+        self.console_output.set_text(self._get_output("Tips: \n  Press Esc button to exit tui. \n  Ctrl+up/down/left/right to adjust the panels.\n"))
 
     def update_top_pane(self):
         """
@@ -308,7 +308,7 @@ class XiangShanSimpleTUI:
         elif cmd == "clear":
             self.console_output.set_text(self._get_output(self.console_default_txt, clear=True))
         elif cmd in ["continue", "c", "count"]:
-            self.console_output.set_text(self._get_output("continue/c/count is not supported in XUI\n"))
+            self.console_output.set_text(self._get_output("continue/c/count is not supported in TUI\n"))
         else:
             self.console_output.set_text(self._get_output(cmd + "\n"))
             cap = self.console_input.caption
@@ -395,7 +395,7 @@ palette = [
 ]
 
 
-def enter_simple_xui(pdb):
+def enter_simple_tui(pdb):
     if urwid is None:
         print("urwid not found, please install urwid first.")
         return

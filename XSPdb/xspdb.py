@@ -2,7 +2,7 @@
 
 import pdb
 import bisect
-from .ui import enter_simple_xui
+from .ui import enter_simple_tui
 from collections import OrderedDict
 import os
 import logging
@@ -34,7 +34,7 @@ def info(msg):
 def debug(msg):
     """Print debug information"""
     xlogger.debug("[Debug] %s" % msg)
-    print(f"[Debug] %s" % msg)
+    print("[Debug] %s" % msg)
     
 
 def error(msg):
@@ -193,7 +193,7 @@ class XSPdb(pdb.Pdb):
         self.flash_base = flash_base
         self.dut_tree = build_prefix_tree(dut.GetInternalSignalList())
         self.prompt = "(XiangShan) "
-        self.in_xui = False
+        self.in_tui = False
         self.interrupt = False
         self.info_cache_asm = {}
         self.info_cache_bsz = 256
@@ -423,7 +423,7 @@ class XSPdb(pdb.Pdb):
         if not os.path.exists(arg):
             error(f"{arg} not found")
             return
-        error("Please call this function in XUI")
+        error("Please call this function in TUI")
 
     def complete_xload_script(self, text, line, begidx, endidx):
         return self.api_complite_localfile(text)
@@ -773,12 +773,12 @@ class XSPdb(pdb.Pdb):
         Args:
             arg (None): No arguments
         """
-        if self.in_xui:
-            error("Already in xui")
+        if self.in_tui:
+            error("Already in TUI")
             return
-        self.in_xui = True
-        enter_simple_xui(self)
-        self.in_xui = False
+        self.in_tui = True
+        enter_simple_tui(self)
+        self.in_tui = False
         self.on_update_tstep = None
         self.interrupt = False
         info("XUI Exited.")
@@ -1187,10 +1187,6 @@ class XSPdb(pdb.Pdb):
         data1 = data[4:8]
         data2 = data[0:4]
         message(f"0x{address:x}: {data1.hex()}\n0x{(address+4):x}: {data2.hex()}")
-        
-        
-        
-        
 
     # Custom APIs for PDB commands and XUI interface
     # All APIs start with get_ or api_
