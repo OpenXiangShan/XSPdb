@@ -518,12 +518,14 @@ class XSPdb(pdb.Pdb):
         update_pc_func = self.condition_instrunct_istep["pc_sync_list"]
         update_pc_func()
         for i in range(instr_count):
-            self.api_step_dut(10000)
+            v = self.api_step_dut(10000)
             update_pc_func()
             if self.api_is_hit_good_trap():
                 break
             elif self.api_is_hit_good_loop():
                 break
+            if v == 10000:
+                warn("step %d cycles complete, but no instruction commit find" % v)
         # remove stepi_check
         self.dut.xclock.RemoveStepRisCbByDesc(cb_key)
         assert cb_key not in self.dut.xclock.ListSteRisCbDesc()
@@ -1122,12 +1124,13 @@ class XSPdb(pdb.Pdb):
             checker = self.xsp.ComUseCondCheck(self.dut.xclock)
             target_trap_vali = self.xsp.ComUseDataArray(1)
             target_trap_code = self.xsp.ComUseDataArray(8)
-            target_trap_vali.FromBytes(int(1).to_bytes(1, byteorder='little', signed=False))
+            target_trap_vali.FromBytes(int(0).to_bytes(1, byteorder='little', signed=False))
             target_trap_code.FromBytes(int(0).to_bytes(8, byteorder='little', signed=False))
             source_trap_code = self.xsp.ComUseDataArray(self.difftest_stat.trap.get_code_address(), 8)
             source_trap_vali = self.xsp.ComUseDataArray(self.difftest_stat.trap.get_hasTrap_address(), 1)
             checker.SetCondition("good_trap", source_trap_code.BaseAddr(), target_trap_code.BaseAddr(), self.xsp.ComUseCondCmp_EQ, 8,
                                  source_trap_vali.BaseAddr(), target_trap_vali.BaseAddr(), 1)
+            checker.SetValidCmpMode("good_trap", self.xsp.ComUseCondCmp_NE)
         else:
             warn("trap.get_code_address not found, please build the latest difftest-python")
             return
@@ -1175,6 +1178,18 @@ class XSPdb(pdb.Pdb):
             cycle (int): Number of cycles
             batch_cycle (int): Number of cycles per run; after each run, check for interrupt signals
         """
+        def check_break():
+            if self.dut.xclock.IsDisable():
+                info("Find break point, break (step %d cycles)" % (self.dut.xclock.clk - c_count))
+                return True
+            fc = getattr(self, "on_update_tstep", None)
+            if fc:
+                fc()
+            if self.api_is_hit_good_trap(show_log=True):
+                return True
+            elif self.api_is_hit_good_loop(show_log=True):
+                return True
+            return False
         assert not self.dut.xclock.IsDisable(), "clock is disable"
         self.interrupt = False
         batch, offset = cycle//batch_cycle, cycle % batch_cycle
@@ -1183,20 +1198,15 @@ class XSPdb(pdb.Pdb):
             if self.interrupt:
                 break
             self.dut.Step(batch_cycle)
-            if self.dut.xclock.IsDisable():
-                info("Find break point, break (step %d cycles)" % (self.dut.xclock.clk - c_count))
-                break
-            fc = getattr(self, "on_update_tstep", None)
-            if fc:
-                fc()
-            if self.api_is_hit_good_trap(show_log=True):
-                break
-            elif self.api_is_hit_good_loop(show_log=True):
+            if check_break():
+                self.interrupt = True
                 break
         if not self.interrupt and not self.dut.xclock.IsDisable():
             self.dut.Step(offset)
+            check_break()
         self.dut.xclock.Enable()
         self.interrupt = False
+        return self.dut.xclock.clk - c_count
 
     def api_dut_reset(self):
         """Reset the DUT"""
