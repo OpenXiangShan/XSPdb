@@ -836,7 +836,7 @@ class XSPdb(pdb.Pdb):
             is_compressed = False
             if not arg.startswith("b'"):
                 arg = int(arg, 0)
-                if arg & 0x3 == 0x3:
+                if (arg & 0x3) != 0x3:
                     is_compressed = True
             else:
                 arg = eval(arg)
