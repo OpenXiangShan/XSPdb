@@ -6,14 +6,17 @@ from .ui import enter_simple_tui
 from collections import OrderedDict
 import os
 
+RESET = "\033[0m"
+GREEN = "\033[32m"
+RED = "\033[31m"
+YELLOW = "\033[33m"
+
 def message(*a, **k):
     """Print a message"""
     print(*a, **k)
 
 def info(msg):
     """Print information"""
-    RESET = "\033[0m"
-    GREEN = "\033[32m"
     print(f"{GREEN}[Info] %s{RESET}" % msg)
 
 def debug(msg):
@@ -22,14 +25,10 @@ def debug(msg):
 
 def error(msg):
     """Print error information"""
-    RESET = "\033[0m"
-    RED = "\033[31m"
     print(f"{RED}[Error] %s{RESET}" % msg)
 
 def warn(msg):
     """Print warning information"""
-    RESET = "\033[0m"
-    YELLOW = "\033[33m"
     print(f"{YELLOW}[Warn] %s{RESET}" % msg)
 
 def build_prefix_tree(signals):
@@ -201,6 +200,7 @@ class XSPdb(pdb.Pdb):
         self.difftest_flash = df.GetFlash()
         self.condition_instrunct_istep = {}
         self.condition_watch_commit_pc = {}
+        self.condition_good_trap = {}
         self.api_dut_reset()
         self.fregs = ["ft0", "ft1", "ft2",  "ft3", "ft4", "ft5", "ft6",  "ft7",  
                       "fs0", "fs1", "fa0",  "fa1", "fa2", "fa3", "fa4",  "fa5",
@@ -212,6 +212,7 @@ class XSPdb(pdb.Pdb):
                       "s8",   "s9", "s10","s11", "t3", "t4", "t5", "t6"]
         self.mpc_iregs = self.iregs.copy()
         self.mpc_iregs[0] = "mpc"
+        self.api_init_good_trap()
 
     # Custom PDB commands and corresponding auto-completion methods
     # do_XXX is the implementation of the command, complete_XXX is the implementation of auto-completion
@@ -521,6 +522,8 @@ class XSPdb(pdb.Pdb):
             update_pc_func()
             if self.api_is_hit_good_trap():
                 break
+            elif self.api_is_hit_good_loop():
+                break
         # remove stepi_check
         self.dut.xclock.RemoveStepRisCbByDesc(cb_key)
         assert cb_key not in self.dut.xclock.ListSteRisCbDesc()
@@ -636,13 +639,14 @@ class XSPdb(pdb.Pdb):
         return [k for k in self.info_watch_list.keys() if k.startswith(text)]
 
     def do_xpc(self, a):
-        """Print the current Commit PCs
+        """Print the current Commit PCs and instructions
 
         Args:
             a (None): No arguments
         """
-        for p in self.get_commit_pc_list():
-            message("PC: 0x%x%s" % (p[0], "" if p[1] else "*"))
+        for i in range(8):
+            cmt = self.difftest_stat.get_commit(i)
+            message(f"PC[{i}]: 0x{cmt.pc:x}    Instr: 0x{cmt.instr:x}")
 
     def do_xexpdiffstate(self, var):
         """Set a variable to difftest_stat
@@ -1081,6 +1085,15 @@ class XSPdb(pdb.Pdb):
             message(f"x{i}: {r}", end=" ")
         message("")
 
+    def do_xtrap_info(self, arg):
+        """Print trap information
+
+        Args:
+            arg (None): No arguments
+        """
+        trap = self.difftest_stat.trap
+        message(f"trap pc: 0x{trap.pc:x}  code: {trap.code}  hasTrap: {trap.hasTrap}  cycle: {trap.cycleCnt} hasWFI: {trap.hasWFI}")
+
     # Custom APIs for PDB commands and TUI interface
     # All APIs start with get_ or api_
     def get_commit_pc_list(self):
@@ -1099,6 +1112,42 @@ class XSPdb(pdb.Pdb):
             else:
                 break
         return pclist
+
+    def api_init_good_trap(self):
+        """Initialize the good trap"""
+        checker = self.condition_good_trap.get("checker")
+        if checker:
+            return
+        if hasattr(self.difftest_stat.trap, "get_code_address"):
+            checker = self.xsp.ComUseCondCheck(self.dut.xclock)
+            target_trap_vali = self.xsp.ComUseDataArray(1)
+            target_trap_code = self.xsp.ComUseDataArray(8)
+            target_trap_vali.FromBytes(int(1).to_bytes(1, byteorder='little', signed=False))
+            target_trap_code.FromBytes(int(0).to_bytes(8, byteorder='little', signed=False))
+            source_trap_code = self.xsp.ComUseDataArray(self.difftest_stat.trap.get_code_address(), 8)
+            source_trap_vali = self.xsp.ComUseDataArray(self.difftest_stat.trap.get_hasTrap_address(), 1)
+            checker.SetCondition("good_trap", source_trap_code.BaseAddr(), target_trap_code.BaseAddr(), self.xsp.ComUseCondCmp_EQ, 8,
+                                 source_trap_vali.BaseAddr(), target_trap_vali.BaseAddr(), 1)
+        else:
+            warn("trap.get_code_address not found, please build the latest difftest-python")
+            return
+        trap_key = "good_trap"
+        self.dut.xclock.RemoveStepRisCbByDesc(trap_key)
+        self.dut.xclock.StepRis(checker.GetCb(), checker.CSelf(), trap_key)
+        self.condition_good_trap["checker"] = checker
+
+    def api_is_hit_good_trap(self, show_log=False):
+        """Check if the good trap is hit
+
+        Returns:
+            bool: Whether the good trap is hit
+        """
+        trap = self.difftest_stat.trap
+        if trap.hasTrap != 0 and trap.code == 0:
+            if show_log:
+                message(f"{GREEN}HIT GOOD TRAP at pc = 0x{trap.pc:x} cycle = 0x{trap.cycleCnt:x} {RESET}")
+            return True
+        return False
 
     def api_complite_localfile(self, text):
         """Auto-complete local files
@@ -1142,6 +1191,8 @@ class XSPdb(pdb.Pdb):
                 fc()
             if self.api_is_hit_good_trap(show_log=True):
                 break
+            elif self.api_is_hit_good_loop(show_log=True):
+                break
         if not self.interrupt and not self.dut.xclock.IsDisable():
             self.dut.Step(offset)
         self.dut.xclock.Enable()
@@ -1150,7 +1201,12 @@ class XSPdb(pdb.Pdb):
     def api_dut_reset(self):
         """Reset the DUT"""
         for i in range(8):
-            self.difftest_stat.get_commit(i).pc = 0x0
+            cmt = self.difftest_stat.get_commit(i)
+            cmt.pc = 0x0
+            cmt.instr = 0x0
+        self.difftest_stat.trap.pc = 0x0
+        self.difftest_stat.trap.code = 32
+        self.difftest_stat.trap.hasTrap = 0
         self.dut.reset.AsImmWrite()
         self.dut.reset.value = 1
         self.dut.reset.AsRiseWrite()
@@ -1371,7 +1427,7 @@ class XSPdb(pdb.Pdb):
                 f.write(self.df.pmem_read(index).to_bytes(8, byteorder='little', signed=False))
         info(f"export {end_index - self.mem_base} bytes to ram file: {bin_file}")
 
-    def api_is_hit_good_trap(self, show_log=False):
+    def api_is_hit_good_loop(self, show_log=False):
         """Check if the good trap is hit
 
         Args:
@@ -1379,14 +1435,12 @@ class XSPdb(pdb.Pdb):
         Returns:
             bool: Whether the good trap is hit
         """
-        RESET = "\033[0m"
-        GREEN = "\033[32m"
         for i in range(8):
             cmt = self.difftest_stat.get_commit(i)
             if cmt and cmt.valid:
                 if cmt.instr == 0x6f:
                     if show_log:
-                        message(f"{GREEN}HIT GOOD TRAP at pc = 0x{cmt.pc:x}{RESET}")
+                        message(f"{GREEN}HIT GOOD LOOP at pc = 0x{cmt.pc:x}{RESET}")
                     return True
         return False
 
@@ -2006,6 +2060,9 @@ class XSPdb(pdb.Pdb):
         if self.api_is_hit_good_trap():
             abs_list += ["\nProgram:"]
             abs_list += [("success_green", "HIT GOOD TRAP")]
+        elif self.api_is_hit_good_loop():
+            abs_list += ["\nProgram:"]
+            abs_list += [("success_green", "HIT GOOD LOOP")]
 
         # TBD
         # abs_list += [("error_red", "\nFIXME:\nMore Data to be done\n")]
