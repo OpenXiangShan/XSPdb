@@ -253,6 +253,7 @@ class XiangShanSimpleTUI:
             self.console_input_busy_index += 1
             n = self.console_input_busy_index % len(self.console_input_busy)
             self.console_input.set_caption(self.console_input_busy[n])
+        self.loop.screen.clear()
         self.loop.draw_screen()
 
     def process_command(self, cmd):
