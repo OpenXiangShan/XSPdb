@@ -728,7 +728,7 @@ class XSPdb(pdb.Pdb):
             a (None): No arguments
         """
         for p in self.get_commit_pc_list():
-            error("PC: 0x%x%s" % (p[0], "" if p[1] else "*"))
+            message("PC: 0x%x%s" % (p[0], "" if p[1] else "*"))
 
     def do_xexpdiffstate(self, var):
         """Set a variable to difftest_stat
@@ -991,7 +991,6 @@ class XSPdb(pdb.Pdb):
         try:
             address = int(params[0], 0)
             self.api_write_bytes(address, self.api_convert_uint64_bytes(params[1]))
-            self.mem_inited = True
             self.info_cache_asm.clear()
         except Exception as e:
             error(f"convert {params[0]} to number fail: {str(e)}")
@@ -1228,7 +1227,8 @@ class XSPdb(pdb.Pdb):
         fname = text
         if "/" in text:
             path, fname = text.rsplit("/", 1)
-        return [os.path.join(path, f) for f in os.listdir(path if path else ".") if f.startswith(fname)]
+        ret = [os.path.join(path, f) for f in os.listdir(path if path else ".") if f.startswith(fname)]
+        return [f + ("/" if os.path.isdir(f) else "") for f in ret]
 
     def api_step_dut(self, cycle, batch_cycle=200):
         """Step through the circuit
@@ -1624,6 +1624,10 @@ class XSPdb(pdb.Pdb):
             dword_write (function): Function to write uint64
         """
         if len(bytes) < 1:
+            error("write data length < 1")
+            return
+        if not self.mem_inited:
+            error("mem not inited, please load a bin file")
             return
         start_offset = address % 8
         head = dword_read(address - start_offset).to_bytes(8,
@@ -1638,6 +1642,7 @@ class XSPdb(pdb.Pdb):
         for i in range(len(data_to_write)//8):
             dword_write(base_address + i*8,  int.from_bytes(data_to_write[i*8:i*8+8],
                                                             byteorder='little', signed=False))
+        info(f"write {len(data_to_write)} bytes to address: 0x{base_address:x} ({len(bytes)} bytes)")
 
     def api_write_bytes(self, address, bytes):
         """Write memory data

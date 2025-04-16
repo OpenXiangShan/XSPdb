@@ -204,8 +204,11 @@ class XiangShanSimpleTUI:
             if " " in line:
                 complete_func = getattr(self.pdb, f"complete_{cmd}", None)
                 if complete_func:
-                    idbg = line.find(args)
-                    cmp = complete_func(args, line, idbg, idbg + len(args))
+                    arg = args
+                    if " " in args:
+                        arg = args.split()[-1]
+                    idbg = line.find(arg)
+                    cmp = complete_func(arg, line, idbg, len(line))
             else:
                 while True:
                     cmp_item = self.pdb.complete(line, state)
