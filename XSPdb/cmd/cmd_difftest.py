@@ -7,6 +7,7 @@ class CmdDiffTest:
     def __init__(self):
         assert hasattr(self, "difftest_stat"), "difftest_stat not found"
         self.condition_watch_commit_pc = {}    
+        self.condition_instrunct_istep = {}
 
     def api_commit_pc_list(self):
         """Get the list of all commit PCs
