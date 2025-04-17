@@ -253,6 +253,7 @@ class XiangShanSimpleTUI:
             self.console_input_busy_index += 1
             n = self.console_input_busy_index % len(self.console_input_busy)
             self.console_input.set_caption(self.console_input_busy[n])
+        self.loop.screen.clear()
         self.loop.draw_screen()
 
     def process_command(self, cmd):
@@ -332,13 +333,13 @@ class XiangShanSimpleTUI:
     def update_asm_abs_info(self):
         self.asm_content.clear()
         asm_size = self.get_part_size("asm")
-        for l in self.pdb.get_asm_info(asm_size):
+        for l in self.pdb.api_asm_info(asm_size):
             self.asm_content.append(
                 urwid.Text(l)
             )
         self.summary_info.clear()
         abs_size = self.get_part_size("abs")
-        for x in self.pdb.get_abs_info(abs_size):
+        for x in self.pdb.api_abs_info(abs_size):
             self.summary_info.append(
                 urwid.Text(x)
             )
