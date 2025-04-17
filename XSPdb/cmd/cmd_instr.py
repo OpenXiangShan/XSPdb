@@ -97,8 +97,7 @@ class CmdInstr:
         return fields
 
     def api_encode_instr16(self, fields):
-        """
-        Encode compressed instruction fields back to 16-bit machine code.
+        """Encode compressed instruction fields back to 16-bit machine code.
 
         Args:
             fields: Dictionary containing decoded fields

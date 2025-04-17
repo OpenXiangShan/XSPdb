@@ -2,6 +2,8 @@
 
 import os
 import inspect
+import importlib.util
+import sys
 
 RESET = "\033[0m"
 GREEN = "\033[32m"
@@ -170,6 +172,12 @@ def register_commands(src_class, dest_class, dest_instance):
                 setattr(dest_class, func, func_obj)
                 dest_instance.register_map[func] = src_class.__name__+"."+cls_name
                 reg_count += 1
+            elif has_override_tag(func_obj):
+                # If the function is overridden, replace it
+                old_func = getattr(dest_class, func)
+                func_obj.__old_func__ = old_func
+                setattr(dest_class, func, func_obj)
+                warn(f"Command {func} overridden in {dest_class.__name__} from {src_class.__name__}.{cls_name}")
             else:
                 warn(f"Command {func} already exists in {dest_class.__name__}, ignoring")
                 continue
@@ -177,3 +185,39 @@ def register_commands(src_class, dest_class, dest_instance):
         if init:
             init(dest_instance)
     return reg_count
+
+
+def load_module_from_file(filepath):
+    module_name = os.path.splitext(os.path.basename(filepath))[0]
+    spec = importlib.util.spec_from_file_location(module_name, filepath)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_package_from_dir(dirpath):
+    module_name = os.path.basename(dirpath)
+    init_path = os.path.join(dirpath, "__init__.py")
+    assert os.path.exists(init_path), f"__init__.py not found in {dirpath}"
+    spec = importlib.util.spec_from_file_location(module_name, init_path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+# decorators
+def override(func):
+    """
+    Decorator to override a function in a class.
+    """
+    func.__is_xspdb_override__ = True
+    return func
+
+
+def has_override_tag(func):
+    """
+    Check if a function is overridden.
+    """
+    return getattr(func, "__is_xspdb_override__", False)

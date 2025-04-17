@@ -4,9 +4,11 @@ import pdb
 from .ui import enter_simple_tui
 from collections import OrderedDict
 import os
+import inspect
 import pkgutil
 
-from XSPdb.cmd.util import message, info, error, build_prefix_tree, register_commands
+from XSPdb.cmd.util import message, info, error, build_prefix_tree, register_commands, YELLOW, RESET
+from XSPdb.cmd.util import load_module_from_file, load_package_from_dir
 
 class XSPdb(pdb.Pdb):
     def __init__(self, dut, df, xsp, default_file=None,
@@ -51,17 +53,57 @@ class XSPdb(pdb.Pdb):
         self.difftest_flash = df.GetFlash()
         self.register_map = OrderedDict()
         self.load_cmds()
+        self.api_init_waveform()
 
     def load_cmds(self):
         import XSPdb.cmd
+        cmd_count = self.api_load_custom_pdb_cmds(XSPdb.cmd)
+        info(f"Loaded {cmd_count} functions from XSPdb.cmd")
+
+    def api_load_custom_pdb_cmds(self, path_or_module):
+        """Load custom command
+
+        Args:
+            path_or_module (string/Module): Command file path or directory (or python module)
+        """
+        if isinstance(path_or_module, str):
+            if path_or_module.strip().endswith("/"):
+                path_or_module = path_or_module.strip()[:-1]
+        mod = path_or_module
+        if not inspect.ismodule(path_or_module):
+            if os.path.isdir(path_or_module):
+                mod = load_package_from_dir(path_or_module)
+            elif os.path.isfile(path_or_module):
+                mod = load_module_from_file(path_or_module)
+                return register_commands(mod, self.__class__, self)
+            else:
+                error(f"Invalid path or module: {path_or_module}")
+                return -1
+        # module
         cmd_count = 0
-        for _, modname, _ in pkgutil.iter_modules(XSPdb.cmd.__path__):
+        for _, modname, _ in pkgutil.iter_modules(mod.__path__):
             if not modname.startswith("cmd_"):
                 continue
-            # load Cmd* Class from cmd.cmd_*
-            mod = __import__(f"XSPdb.cmd.{modname}", fromlist=[modname])
-            cmd_count += register_commands(mod, self.__class__, self)
-        info(f"Loaded {cmd_count} commands from XSPdb.cmd")
+            submod = __import__(f"{mod.__name__}.{modname}", fromlist=[modname])
+            cmd_count += register_commands(submod, self.__class__, self)
+        return cmd_count
+
+    def do_xuse_custom_cmds(self, arg):
+        """Load custom command from file or directory
+
+        Args:
+            arg (string): Command file path or directory (or python module)
+        """
+        if not arg:
+            error("Please specify a file or directory")
+            message("usage: xuse_custom_cmds <file/directory/module>")
+            return
+        cmd_count = self.api_load_custom_pdb_cmds(arg)
+        info(f"Loaded {cmd_count} commands from {arg}")
+
+    def complete_xuse_custom_cmds(self, text, line, begidx, endidx):
+        """Complete the custom command file or directory"""
+        return self.api_complite_localfile(text)
 
     def do_xexportself(self, var):
         """Set a variable to XSPdb self
@@ -112,9 +154,13 @@ class XSPdb(pdb.Pdb):
         for cmd in dir(self):
             if not cmd.startswith("do_x"):
                 continue
-            cmd_name = cmd[4:]
+            cmd_name = cmd[3:]
             max_cmd_len = max(max_cmd_len, len(cmd_name))
-            cmd_desc = getattr(self, cmd).__doc__.split("\n")[0]
+            cmd_desc = f"{YELLOW}Description not found{RESET}"
+            try:
+                cmd_desc = getattr(self, cmd).__doc__.split("\n")[0]
+            except Exception as e:
+                pass
             cmds.append((cmd, cmd_name, cmd_desc))
             cmd_count += 1
         cmds.sort(key=lambda x: x[0])
@@ -136,7 +182,11 @@ class XSPdb(pdb.Pdb):
                 continue
             api_name = api
             max_api_len = max(max_api_len, len(api_name))
-            api_desc = getattr(self, api).__doc__.split("\n")[0]
+            api_desc = f"{YELLOW}Description not found{RESET}"
+            try:
+                api_desc = getattr(self, api).__doc__.split("\n")[0]
+            except Exception as e:
+                pass
             apis.append((api, api_name, api_desc))
             api_count += 1
         apis.sort(key=lambda x: x[0])
