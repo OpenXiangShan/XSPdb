@@ -1,6 +1,7 @@
 #coding=utf-8
 
 from XSPdb.cmd.util import error, message
+import os
 
 class CmdInstr:
     """Instruction command class
