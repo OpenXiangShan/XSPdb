@@ -7,7 +7,7 @@ import os
 import inspect
 import pkgutil
 
-from XSPdb.cmd.util import message, info, error, build_prefix_tree, register_commands, YELLOW, RESET
+from XSPdb.cmd.util import message, info, error, build_prefix_tree, register_commands, YELLOW, RESET, set_log, set_log_file
 from XSPdb.cmd.util import load_module_from_file, load_package_from_dir
 
 class XSPdb(pdb.Pdb):
@@ -193,3 +193,33 @@ class XSPdb(pdb.Pdb):
         for c in apis:
             message(("%-"+str(max_api_len+2)+"s: %s (from %s)") % (c[1], c[2], self.register_map.get(c[0], self.__class__.__name__)))
         info(f"Total {api_count} APIs")
+
+    def do_xset_log(self, arg):
+        """Set log on or off
+
+        Args:
+            arg (string): Log level
+        """
+        if not arg:
+            message("usage: xset_log <on or off>")
+            return
+        if arg == "on":
+            info("Set log on")
+            set_log(True)
+        elif arg == "off":
+            set_log(False)
+            info("Set log off")
+        else:
+            message("usage: xset_log <on or off>")
+    
+    def do_xset_log_file(self, arg):
+        """Set log file
+
+        Args:
+            arg (string): Log file name
+        """
+        if not arg:
+            message("usage: xset_log_file <log file>")
+            return
+        set_log_file(arg)
+        info("Set log file to %s" % arg)
