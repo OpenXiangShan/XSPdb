@@ -3,6 +3,8 @@ tmp/
 ready-to-run/*
 *.tar.gz
 XSPython/*
+*.fst
+*.vcd
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
