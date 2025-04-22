@@ -139,7 +139,7 @@ class CmdInfo:
         if self.info_watch_list:
             abs_list += ["\nWatch List:"]
             for k , v in self.info_watch_list.items():
-                abs_list += [f"{k}({v.W()}): 0x{v.value}"]
+                abs_list += [f"{k}({v.W()}): 0x{v.value:x}"]
 
         if self.flash_bin_file:
             abs_list += ["\nFlash Bin:"]
