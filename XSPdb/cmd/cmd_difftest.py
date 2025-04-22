@@ -160,6 +160,10 @@ class CmdDiffTest:
                 break
             if v == 10000:
                 warn("step %d cycles complete, but no instruction commit find" % v)
+            if self.interrupt:
+                break
+            if self.dut.xclock.IsDisable():
+                break
         # remove stepi_check
         self.dut.xclock.RemoveStepRisCbByDesc(cb_key)
         assert cb_key not in self.dut.xclock.ListSteRisCbDesc()

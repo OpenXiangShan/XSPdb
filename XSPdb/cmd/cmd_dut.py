@@ -1,7 +1,7 @@
 #coding=utf-8
 
 import os
-
+import time
 from XSPdb.cmd.util import info, error, message, get_completions
 
 class CmdDut:
@@ -30,6 +30,7 @@ class CmdDut:
             elif self.api_is_hit_good_loop(show_log=True):
                 return True
             return False
+        self.dut.xclock.Enable()
         assert not self.dut.xclock.IsDisable(), "clock is disable"
         self.interrupt = False
         batch, offset = cycle//batch_cycle, cycle % batch_cycle
@@ -44,8 +45,6 @@ class CmdDut:
         if not self.interrupt and not self.dut.xclock.IsDisable():
             self.dut.Step(offset)
             check_break()
-        self.dut.xclock.Enable()
-        self.interrupt = False
         return self.dut.xclock.clk - c_count
 
     def api_dut_reset(self):
@@ -160,6 +159,7 @@ class CmdDut:
                 steps = int(cycle[1])
             cycle = int(cycle[0])
             self.api_step_dut(cycle, steps)
+            info(f"step {cycle} cycles complete")
         except Exception as e:
             error(e)
 
