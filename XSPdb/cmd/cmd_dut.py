@@ -9,7 +9,130 @@ class CmdDut:
     def __init__(self):
         assert hasattr(self, "dut"), "this class must be used in XSPdb, canot be used alone"
         self.interrupt = False
+        self.xdut_signal_breaks = {}
         self.api_dut_reset()
+
+    def api_xbreak(self, signal_name, condition, value):
+        """Set a breakpoint on a signal
+
+        Args:
+            signal_name (string): Name of the signal
+            condition (string): Condition for the breakpoint: eq, ne, gt, lt, ge, le, ch
+            value (int/string): Value for the breakpoint
+        """
+        checker = self.xdut_signal_breaks.get("checker")
+        checker_key = "xdut_signal_break"
+        if not checker:
+            checker = self.xsp.ComUseCondCheck(self.dut.xclock)
+            self.dut.xclock.RemoveStepRisCbByDesc(checker_key)
+            self.dut.xclock.StepRis(checker.GetCb(), checker.CSelf(), checker_key)
+            self.xdut_signal_breaks["checker"] = checker
+        xbreak_key = "xbreak-%s-%s-%s"%(signal_name, condition, value)
+        if xbreak_key in checker.ListCondition():
+            error(f"signal {xbreak_key} already set")
+            return
+        sig = self.dut.GetInternalSignal(signal_name)
+        if not sig:
+            error(f"first signal {signal_name} not found")
+            return
+        if isinstance(value, str):
+            val = self.dut.GetInternalSignal(value)
+            if not val:
+                error(f"second signal {value} not found")
+                return
+        else:
+            val = self.xsp.XData(sig.W(), self.xsp.XData.InOut)
+            val.value = value
+        condition_map = {
+            "eq": self.xsp.ComUseCondCmp_EQ,
+            "ne": self.xsp.ComUseCondCmp_NE,
+            "gt": self.xsp.ComUseCondCmp_GT,
+            "lt": self.xsp.ComUseCondCmp_LT,
+            "ge": self.xsp.ComUseCondCmp_GE,
+            "le": self.xsp.ComUseCondCmp_LE,
+            "ch": self.xsp.ComUseCondCmp_NE,
+        }
+        cmp = condition_map.get(condition.lower(), None)
+        if cmp is None:
+            error(f"condition '{condition}' not supported")
+            return
+        checker.SetCondition(xbreak_key, sig, val, cmp)
+        self.xdut_signal_breaks[xbreak_key] = {"sig": sig, "val": val, "cmp": condition.lower()}
+
+    def api_xunbreak(self, xbreak_key):
+        """Remove a breakpoint on a signal
+
+        Args:
+            signal_name (string): Name of the signal
+        """
+        checker = self.xdut_signal_breaks.get("checker")
+        if not checker:
+            warn("checker not found, please set a breakpoint first")
+            return
+        rcount = 0
+        kcount = 0
+        for k, _ in checker.ListCondition().items():
+            kcount += 1
+            if k.startswith(xbreak_key):
+                checker.RemoveCondition(k)
+                del self.xdut_signal_breaks[k]
+                info(f"remove signal {k} break")
+                rcount +=1
+                kcount -= 1
+        if kcount == 0:
+            self.dut.xclock.RemoveStepRisCbByDesc("xdut_signal_break")
+            assert "xdut_signal_break" not in self.dut.xclock.ListSteRisCbDesc()
+            self.xdut_signal_breaks.clear()
+            info("No signal to watch, remove checker")
+        if rcount > 0:
+            return
+        warn(f"signal {xbreak_key} not found, please set a breakpoint first")
+
+    def api_xbreak_update_ch(self):
+        """Update the condition of the signal breakpoint"""
+        checker = self.xdut_signal_breaks.get("checker")
+        if not checker:
+            warn("checker not found, please set a breakpoint first")
+            return
+        for k, v in self.xdut_signal_breaks.items():
+            if not k.startswith("xbreak-"):
+                continue
+            if v["cmp"] == "ch":
+                v["val"].value = v["sig"].value
+                info(f"update signal {k}, save value {v['val'].value}")
+
+    def api_xbreak_clear(self):
+        """Clear all breakpoints"""
+        checker = self.xdut_signal_breaks.get("checker")
+        if not checker:
+            warn("checker not found, please set a breakpoint first")
+            return
+        checker.ClearCondition()
+        self.dut.xclock.RemoveStepRisCbByDesc("xdut_signal_break")
+        assert "xdut_signal_break" not in self.dut.xclock.ListSteRisCbDesc()
+        self.xdut_signal_breaks.clear()
+        info("clear all signal breakpoints")
+
+    def api_xbreak_list(self):
+        """List all breakpoints"""
+        ret = []
+        checker = self.xdut_signal_breaks.get("checker")
+        if not checker:
+            return ret
+        checked = {k: v for (k, v) in checker.ListCondition().items()}
+        for k, v in self.xdut_signal_breaks.items():
+            if not k.startswith("xbreak-"):
+                continue
+            ret.append((k, v["sig"].value, v["cmp"], v["val"].value, checked[k]))
+        ret.sort(key=lambda x: x[0])
+        return ret
+
+    def api_is_xbreak_on(self):
+        """Check if the breakpoint is on"""
+        checker = self.xdut_signal_breaks.get("checker")
+        if checker:
+            return True
+        return False
 
     def api_step_dut(self, cycle, batch_cycle=200):
         """Step through the circuit
@@ -184,3 +307,87 @@ class CmdDut:
     def complete_xprint(self, text, line, begidx, endidx):
         cmp = get_completions(self.dut_tree, text)
         return cmp
+
+    def do_xbreak(self, arg):
+        """Set a breakpoint on a signal
+
+        Args:
+            signal_name (string): Name of the signal
+            condition (string): Condition for the breakpoint: eq, ne, gt, lt, ge, le, ch, default is eq
+            value (int): Value for the breakpoint, default is 0
+        """
+        args = arg.strip().split()
+        value = 0
+        condition = "eq"
+        try:
+            if len(args) > 2:
+                try:
+                    value = int(args[2], 0)
+                except Exception as e:
+                    value = args[2]
+            if len(args) > 1:
+                condition = args[1]
+            if len(args) < 1:
+                message("usage: xbreak signal_name [condition] [value]")
+                return
+            if not condition in ["eq", "ne", "gt", "lt", "ge", "le", "ch"]:
+                message("condition must be eq, ne, gt, lt, ge, le, ch")
+                return
+            signal_name = args[0]
+            self.api_xbreak(signal_name, condition, value)
+        except Exception as e:
+            error(f"parse args fail: {str(e)}\n usage: xbreak signal_name [condition] [value]")
+            return
+
+    def complete_xbreak(self, text, line, begidx, endidx):
+        cmd = text.strip()
+        cmd_list = [c for c in line.strip().split() if c]
+        if (len(cmd_list) == 2 and line.endswith(" ")) or (len(cmd_list) == 3 and not line.endswith(" ")):
+                return [k for k in ["eq", "ne", "gt", "lt", "ge", "le", "ch"] if k.startswith(cmd)]
+        return get_completions(self.dut_tree, text)
+
+    def do_xunbreak(self, arg):
+        """Remove a breakpoint on a signal
+
+        Args:
+            signal_name (string): Name of the signal
+        """
+        if not arg.strip():
+            message("do you want to clear all breakpoints? (y/n):")
+            while True:
+                fc = getattr(self, "on_update_tstep", None)
+                if fc:
+                    fc()
+                ans = input()
+                if ans == "y":
+                    self.api_xbreak_clear()
+                    break
+                elif ans == "n":
+                    break
+                else:
+                    message("please input y or n")
+            return
+        if arg.strip() == "all":
+            self.api_xbreak_clear()
+            return
+        self.api_xunbreak(arg.strip())
+
+    def complete_xunbreak(self, text, line, begidx, endidx):
+        if not text:
+            return [k for k in self.xdut_signal_breaks.keys() if k.startswith("xbreak-")]
+        return [k for k in self.xdut_signal_breaks.keys() if k.startswith(text) and k != "xdut_signal_break"]
+
+    def do_xbreak_list(self, arg):
+        """List all breakpoints"""
+        ret = self.api_xbreak_list()
+        if not ret:
+            message("no signal break")
+            return
+        for br in ret:
+            message(f"{br[0]}(0x{br[1]:x}) {br[2]} 0x{br[3]:x} hinted: {br[4]}")
+        message(f"total {len(ret)} breakpoints")
+
+    def do_xbreak_update(self, arg):
+        """Update the condition of the signal breakpoint"""
+        self.api_xbreak_update_ch()
+        info("update signal break condition complete")

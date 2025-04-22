@@ -176,6 +176,14 @@ class CmdInfo:
             trap_info = self.api_get_trap_info()
             abs_list += [f"pc: 0x{trap_info['pc']:x}  code: 0x{trap_info['code']:x}  hasTrap: {trap_info['hasTrap']}  cycle: 0x{trap_info['cycleCnt']:x} hasWFI: {trap_info['hasWFI']}"]
 
+        if self.api_is_xbreak_on():
+            abs_list += ["\nXBreaks:"]
+            for br in self.api_xbreak_list():
+                if br[4]:
+                    abs_list += [("error_red", f"{br[0]}(0x{br[1]:x}) {br[2]} 0x{br[3]:x} hinted: {br[4]}")]
+                else:
+                    abs_list += [f"{br[0]}(0x{br[1]:x}) {br[2]} 0x{br[3]:x} hinted: {br[4]}"]
+
         # TBD
         # abs_list += [("error_red", "\nFIXME:\nMore Data to be done\n")]
         return abs_list
