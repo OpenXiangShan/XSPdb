@@ -120,3 +120,5 @@ LD_PRELOAD=XSPython/xspcomm/libxspcomm.so.0.0.1 PYTHONPATH=. python3 example/tes
 - `xlist_flash_iregs` List Flash internal registers
 - `xlist_flash_fregs` List Flash floating-point registers
 - `xlist_freg_map` List floating-point register mappings
+
+You can use `xcmds` to list all commands, their descriptions, and the modules they belong to (use `xapis` to list all APIs, their descriptions, and their modules).

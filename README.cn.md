@@ -124,3 +124,5 @@ LD_PRELOAD=XSPython/xspcomm/libxspcomm.so.0.0.1 PYTHONPATH=. python3 example/tes
 - `xlist_flash_iregs` List Flash internal registers （列出Flash内部寄存器）
 - `xlist_flash_fregs` List Flash floating-point registers （列出Flash浮点寄存器）
 - `xlist_freg_map` List floating-point register mappings （列出浮点寄存器映射）
+
+可通过`xcmds`列出所有命令，说明和所在module（通过`xapis`列出所有API，说明和所在module）。
