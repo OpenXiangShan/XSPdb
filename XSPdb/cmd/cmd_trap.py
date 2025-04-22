@@ -1,6 +1,6 @@
 #coding=utf-8
 
-from XSPdb.cmd.util import message, warn, GREEN, RESET
+from XSPdb.cmd.util import message, warn, GREEN, RESET, info
 
 class CmdTrap:
     """Trap command class
@@ -9,6 +9,7 @@ class CmdTrap:
     def __init__(self):
         assert hasattr(self, "dut"), "this class must be used in XSPdb, canot be used alone"
         self.condition_good_trap = {}
+        self.break_on_trap = {}
         self.api_init_good_trap()
 
     def api_init_good_trap(self):
@@ -65,11 +66,88 @@ class CmdTrap:
                     return True
         return False
 
+    def api_break_on_trap(self, on):
+        """Set breakpoint on trap
+
+        Args:
+            on (bool): Whether to set breakpoint on trap
+        """
+        check = self.break_on_trap.get("checker")
+        if not check:
+            check = self.xsp.ComUseCondCheck(self.dut.xclock)
+            target_trap_vali = self.xsp.ComUseDataArray(1)
+            target_trap_vali.SetZero()
+            source_trap_vali = self.xsp.ComUseDataArray(self.difftest_stat.trap.get_hasTrap_address(), 1)
+            check.SetCondition("break_on_trap", source_trap_vali.BaseAddr(), target_trap_vali.BaseAddr(), self.xsp.ComUseCondCmp_EQ, 1)
+            self.break_on_trap["checker"] = check
+        trap_key = "break_on_trap"
+        self.break_on_trap["on"] = on
+        if on:
+            self.dut.xclock.RemoveStepRisCbByDesc(trap_key)
+            self.dut.xclock.StepRis(check.GetCb(), check.CSelf(), trap_key)
+        else:
+            self.dut.xclock.RemoveStepRisCbByDesc(trap_key)
+
+    def api_is_trap_break_on(self):
+        """Check if the trap is break on
+
+        Returns:
+            bool: Whether the trap is break on
+        """
+        return self.break_on_trap.get("on", False)
+
+    def api_is_hit_trap_break(self, show_log=False):
+        """Check if the trap is break
+
+        Args:
+            show_log (bool): Whether to show the log
+        Returns:
+            bool: Whether the trap is break
+        """
+        trap = self.difftest_stat.trap
+        if trap.hasTrap != 0 and self.api_is_trap_break_on():
+            if show_log:
+                message(f"{GREEN}HIT TRAP BREAK pc: 0x{trap.pc:x} code: 0x{trap.code:x} hasWFI: {trap.hasWFI}{RESET}")
+            return True
+        return False
+
+    def api_get_trap_info(self):
+        """Get trap information
+
+        Returns:
+            dict: Trap information
+        """
+        trap = self.difftest_stat.trap
+        return {
+            "pc": trap.pc,
+            "code": trap.code,
+            "hasTrap": trap.hasTrap,
+            "cycleCnt": trap.cycleCnt,
+            "hasWFI": trap.hasWFI
+        }
+
+    def do_xtrap_break_on(self, arg):
+        """Set breakpoint on trap
+
+        Args:
+            arg (None): No arguments
+        """
+        self.api_break_on_trap(True)
+        info("trap break on")
+
+    def do_xtrap_break_off(self, arg):
+        """Unset breakpoint on trap
+        Args:
+            arg (None): No arguments
+        """
+        self.api_break_on_trap(False)
+        info("trap break off")
+
     def do_xtrap_info(self, arg):
         """Print trap information
 
         Args:
             arg (None): No arguments
         """
-        trap = self.difftest_stat.trap
-        message(f"trap pc: 0x{trap.pc:x}  code: {trap.code}  hasTrap: {trap.hasTrap}  cycle: {trap.cycleCnt} hasWFI: {trap.hasWFI}")
+        info = self.api_get_trap_info()
+        message(f"trap pc: 0x{info['pc']:x}  code: 0x{info['code']:x}  hasTrap: {info['hasTrap']}  cycle: 0x{info['cycleCnt']:x} hasWFI: {info['hasWFI']}")

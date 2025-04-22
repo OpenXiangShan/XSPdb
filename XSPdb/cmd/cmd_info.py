@@ -171,6 +171,11 @@ class CmdInfo:
             abs_list += ["\nProgram:"]
             abs_list += [("success_green", "HIT GOOD LOOP")]
 
+        if self.api_is_trap_break_on():
+            abs_list += ["\nTrap Info:"]
+            trap_info = self.api_get_trap_info()
+            abs_list += [f"pc: 0x{trap_info['pc']:x}  code: 0x{trap_info['code']:x}  hasTrap: {trap_info['hasTrap']}  cycle: 0x{trap_info['cycleCnt']:x} hasWFI: {trap_info['hasWFI']}"]
+
         # TBD
         # abs_list += [("error_red", "\nFIXME:\nMore Data to be done\n")]
         return abs_list

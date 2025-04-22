@@ -2,7 +2,7 @@
 
 import os
 import time
-from XSPdb.cmd.util import info, error, message, get_completions
+from XSPdb.cmd.util import info, error, message, warn, get_completions
 
 class CmdDut:
     
@@ -18,6 +18,8 @@ class CmdDut:
             cycle (int): Number of cycles
             batch_cycle (int): Number of cycles per run; after each run, check for interrupt signals
         """
+        if not self.mem_inited:
+            warn("mem not inited, please load bin file first")
         def check_break():
             if self.dut.xclock.IsDisable():
                 info("Find break point, break (step %d cycles)" % (self.dut.xclock.clk - c_count))
@@ -28,6 +30,8 @@ class CmdDut:
             if self.api_is_hit_good_trap(show_log=True):
                 return True
             elif self.api_is_hit_good_loop(show_log=True):
+                return True
+            elif self.api_is_hit_trap_break(show_log=True):
                 return True
             return False
         self.dut.xclock.Enable()
@@ -157,11 +161,15 @@ class CmdDut:
             cycle = arg.strip().split()
             if len(cycle) > 1:
                 steps = int(cycle[1])
-            cycle = int(cycle[0])
-            self.api_step_dut(cycle, steps)
-            info(f"step {cycle} cycles complete")
+            if len(cycle) > 0:
+                cycle = int(cycle[0])
+            else:
+                cycle = 1
+            rcycles = self.api_step_dut(cycle, steps)
+            info(f"step {rcycles} cycles complete" + (f" ({cycle - rcycles} cycle missed)" if rcycles != cycle else ""))
         except Exception as e:
             error(e)
+            message("usage: xstep [cycle] [<steps>]")
 
     def do_xprint(self, arg):
         """Print the value and width of an internal signal
