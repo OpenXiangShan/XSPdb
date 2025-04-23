@@ -15,4 +15,8 @@ def test_sim_top():
         dut.Step(1000)
 
 if __name__ == "__main__":
-    test_sim_top()
+    from bdb import BdbQuit
+    try:
+        test_sim_top()
+    except BdbQuit:
+        pass
