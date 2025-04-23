@@ -10,6 +10,7 @@ try:
 except ImportError:
     urwid = None
 
+from XSPdb.cmd.util import GREEN, RESET
 
 class XiangShanSimpleTUI:
     def __init__(self, pdb, console_max_height=10, content_asm_fix_width=55, console_prefix="(xiangshan)"):
@@ -71,7 +72,7 @@ class XiangShanSimpleTUI:
         self.update_asm_abs_info()
         # Note: need to update console output in the end
         self._handle_stdout_error()
-        self.console_output.set_text(self._get_output("Tips: \n  Press Esc button to exit tui. \n  Ctrl+up/down/left/right to adjust the panels.\n"))
+        self.console_output.set_text(self._get_output(f"{GREEN}Tips: \n  Press Esc button(or cmd exit) to exit tui. \n  Ctrl+up/down/left/right to adjust the panels.{RESET}\n"))
 
     def update_top_pane(self):
         """
@@ -257,7 +258,10 @@ class XiangShanSimpleTUI:
         self.loop.draw_screen()
 
     def process_command(self, cmd):
-        if cmd.startswith("xload_script"):
+        if cmd.strip() == ("exit"):
+            self.exit()
+            return
+        elif cmd.startswith("xload_script"):
             args = cmd.strip().split()
             if len(args) < 2:
                 self.console_output.set_text(self._get_output("Usage: xload_script <script_file> [gap_time]\n"))
