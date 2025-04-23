@@ -36,6 +36,19 @@ class CmdTrap:
         self.dut.xclock.StepRis(checker.GetCb(), checker.CSelf(), trap_key)
         self.condition_good_trap["checker"] = checker
 
+    def api_disable_good_trap(self, disable):
+        """disable good trap
+        Args:
+            disable (bool): Whether to disable good trap
+        """
+        if disable:
+            checker = self.condition_good_trap.get("checker")
+            if checker:
+                self.dut.xclock.RemoveStepRisCbByDesc("good_trap")
+                self.condition_good_trap.clear()
+        else:
+            self.api_init_good_trap()
+
     def api_is_hit_good_trap(self, show_log=False):
         """Check if the good trap is hit
 
@@ -125,6 +138,30 @@ class CmdTrap:
             "cycleCnt": trap.cycleCnt,
             "hasWFI": trap.hasWFI
         }
+
+    def do_xgood_trap_disable(self, arg):
+        """Disable good trap
+
+        Args:
+            arg (bool): Whether to disable good trap
+        """
+        disable = True
+        if arg.strip():
+            if arg.lower() == "false":
+                disable = False
+            elif arg.lower() == "true":
+                disable = True
+            else:
+                warn(f"arg {arg} is not true or false\n usage: xgood_trap_disable [true|false]")
+                return
+        self.api_disable_good_trap(disable)
+        if disable:
+            info("good trap is disabled")
+        else:
+            info("good trap is enabled")
+
+    def complete_xgood_trap_disable(self, text, line, begidx, endidx):
+        return [x for x in ["true", "false"] if x.startswith(text)] if text else ["true", "false"]
 
     def do_xtrap_break_on(self, arg):
         """Set breakpoint on trap
