@@ -27,3 +27,11 @@ xistep
 xdasm 0x800116b0 2
 #xexport_bin 0x80011800 tmp/test_float
 xexport_bin 0x80011800 tmp/test_float 0x800116b0
+
+
+# test waveform on/off
+#xload ready-to-run/microbench.bin
+#xbreak SimTop_top.SimTop.timer eq 0x39000
+#xstep 100000000
+#xwave_on
+#xwave_off
