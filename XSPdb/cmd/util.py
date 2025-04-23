@@ -4,31 +4,82 @@ import os
 import inspect
 import importlib.util
 import sys
+import logging
 
 RESET = "\033[0m"
 GREEN = "\033[32m"
 RED = "\033[31m"
 YELLOW = "\033[33m"
 
+log = False
+logger = None
+
+def set_log(set_logging:bool):
+    global log
+    global logger
+    
+    log = set_logging
+    if log and logger is None:
+        #initialize logger
+        logger = logging.getLogger("XSPdb")
+        logger.setLevel(logging.DEBUG)
+        ch = logging.FileHandler("XSPdb.log")
+        ch.setLevel(logging.DEBUG)
+        formatter = logging.Formatter('%(message)s')
+        ch.setFormatter(formatter)
+        logger.addHandler(ch)
+
+def set_log_file(log_file:str):
+    global logger
+    if logger is None:
+        logger = logging.getLogger("XSPdb")
+        logger.setLevel(logging.DEBUG)
+        ch = logging.FileHandler(log_file)
+        ch.setLevel(logging.DEBUG)
+        formatter = logging.Formatter('%(message)s')
+        ch.setFormatter(formatter)
+        logger.addHandler(ch)
+    else:
+        for handler in logger.handlers:
+            if isinstance(handler, logging.FileHandler):
+                handler.close()
+                logger.removeHandler(handler)
+        ch = logging.FileHandler(log_file)
+        ch.setLevel(logging.DEBUG)
+        formatter = logging.Formatter('%(message)s')
+        ch.setFormatter(formatter)
+        logger.addHandler(ch)
+
+
 def message(*a, **k):
     """Print a message"""
     print(*a, **k)
+    if log:
+        logger.debug(*a, **k)
 
 def info(msg):
     """Print information"""
     print(f"{GREEN}[Info] %s{RESET}" % msg)
+    if log:
+        logger.info("[Info] %s" % msg)
 
 def debug(msg):
     """Print debug information"""
     print("[Debug] %s" % msg)
+    if log:
+        logger.debug("[Debug] %s" % msg)
 
 def error(msg):
     """Print error information"""
     print(f"{RED}[Error] %s{RESET}" % msg)
+    if log:
+        logger.error("[Error] %s" % msg)
 
 def warn(msg):
     """Print warning information"""
     print(f"{YELLOW}[Warn] %s{RESET}" % msg)
+    if log:
+        logger.warn("[Warn] %s" % msg)
 
 def build_prefix_tree(signals):
     tree = {}

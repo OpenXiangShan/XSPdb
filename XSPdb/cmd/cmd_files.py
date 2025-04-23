@@ -3,6 +3,7 @@
 import os
 
 from XSPdb.cmd.util import info, error, message, warn
+import os
 
 class CmdFiles:
     

@@ -280,6 +280,32 @@ class XiangShanSimpleTUI:
                         continue
                     self.process_command(line)
                     time.sleep(gap_time)
+
+        elif cmd.startswith("xload_log"):
+            args = cmd.strip().split()
+            if len(args) < 2:
+                self.console_output.set_text(self._get_output("Usage: xload_log <log_file> [gap_time]\n"))
+                return
+            log_file = args[1]
+            gap_time = 0
+            if len(args) > 2:
+                gap_time = float(args[2])
+            if not os.path.exists(log_file):
+                self.console_output.set_text(self._get_output(f"Error: Log file {log_file} not found.\n"))
+                return
+            with open(log_file, "r") as f:
+                for line in f.readlines():
+                    
+                    line = line[line.find(']')+1:].strip()
+                    
+                    if not line.startswith("------onecmd:"):
+                        continue
+                    
+                    line = line.split("------onecmd:")[1].strip()
+                    if line:
+                        self.process_command(line)
+                    time.sleep(gap_time)
+
         elif cmd == "clear":
             self.console_output.set_text(self._get_output(self.console_default_txt, clear=True))
         elif cmd in ["continue", "c", "count"]:
@@ -336,7 +362,7 @@ class XiangShanSimpleTUI:
             clear_success = True
         except Exception as e:
             import traceback
-            self.console_output.set_text(self._get_output("%s\n\%sn"%(str(e),
+            self.console_output.set_text(self._get_output("%s\n%s\n"%(str(e),
                                          traceback.format_exc())))
             self.exit_error = e
         if clear_success:
