@@ -18,10 +18,10 @@ class CmdMRW:
         """
         if len(bytes) < 1:
             error("write data length < 1")
-            return
+            return False
         if not self.mem_inited:
             error("mem not inited, please load a bin file")
-            return
+            return False
         start_offset = address % 8
         head = dword_read(address - start_offset).to_bytes(8,
                               byteorder='little', signed=False)[:start_offset]
@@ -36,6 +36,7 @@ class CmdMRW:
             dword_write(base_address + i*8,  int.from_bytes(data_to_write[i*8:i*8+8],
                                                             byteorder='little', signed=False))
         info(f"write {len(data_to_write)} bytes to address: 0x{base_address:x} ({len(bytes)} bytes)")
+        return True
 
     def api_write_bytes(self, address, bytes):
         """Write memory data
@@ -45,18 +46,20 @@ class CmdMRW:
             bytes (bytes): Data to write
         """
         if address < self.mem_base:
-            self.api_write_bytes_with_rw(address - self.flash_base,
+            ret = self.api_write_bytes_with_rw(address - self.flash_base,
                                                 bytes, self.df.FlashRead, self.df.FlashWrite)
         else:
-            self.api_write_bytes_with_rw(address,
+            ret = self.api_write_bytes_with_rw(address,
                                                 bytes, self.df.pmem_read, self.df.pmem_write)
-        # Delete asm data in cache
-        pos_str = address - address % self.info_cache_bsz
-        pos_end = address + len(bytes)
-        pos_end = (pos_end - pos_end % self.info_cache_bsz) + self.info_cache_bsz
-        for cache_index in range(pos_str, pos_end, self.info_cache_bsz):
-            if cache_index in self.info_cache_asm:
-                del self.info_cache_asm[cache_index]
+        if ret:
+            # Delete asm data in cache
+            pos_str = address - address % self.info_cache_bsz
+            pos_end = address + len(bytes)
+            pos_end = (pos_end - pos_end % self.info_cache_bsz) + self.info_cache_bsz
+            for cache_index in range(pos_str, pos_end, self.info_cache_bsz):
+                if cache_index in self.info_cache_asm:
+                    del self.info_cache_asm[cache_index]
+        return ret
 
     def do_xmem_write(self, arg):
         """Write memory data
