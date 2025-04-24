@@ -2,7 +2,7 @@
 
 import bisect
 from collections import OrderedDict
-from XSPdb.cmd.util import error
+from XSPdb.cmd.util import error, info
 
 
 class CmdInfo:
@@ -15,6 +15,23 @@ class CmdInfo:
         self.info_cache_bsz = 256
         self.info_cached_cmpclist = None
         self.info_watch_list = OrderedDict()
+        self.info_force_address = None
+
+    def do_xset_dasm_info_force_mid_address(self, arg):
+        """Set the force mid address for disassembly Info (the disassembly info in the TUI window)
+
+        Args:
+            arg (number or empty): Address to force disassembly
+        """
+        if not arg.strip():
+            info("reset dasm info force address to None")
+            self.info_force_address = None
+            return
+        try:
+            self.info_force_address = int(arg, 0)
+            info(f"force address set to 0x{self.info_force_address:x}")
+        except ValueError:
+            error(f"Invalid address: {arg}")
 
     def api_asm_info(self, size):
         """Get the current memory disassembly
@@ -39,6 +56,9 @@ class CmdInfo:
 
         if pc_last == base_addr and valid_pc_list:
             pc_last = max(valid_pc_list)
+
+        if self.info_force_address:
+            pc_last = self.info_force_address - self.info_force_address % 2
 
         self.info_cached_cmpclist = pc_list.copy()
         # Check the cache first; if not found, generate it
@@ -74,6 +94,9 @@ class CmdInfo:
             line = "%s|0x%x: %s  %s  %s" % (">" if find_pc else " ", l[0], l[1], l[2], l[3])
             if find_pc and l[0] == pc_last:
                 line = ("norm_red", line)
+            if self.info_force_address is not None:
+                if l[0] == self.info_force_address:
+                    line = ("light blue", line)
             asm_lines.append(line)
         return asm_lines
 
@@ -130,6 +153,10 @@ class CmdInfo:
                      ]
         # fcsr
         abs_list += ["\nFCSR: 0x%x" % self.difftest_stat.fcsr.fcsr]
+
+        # DASM info base address
+        if self.info_force_address is not None:
+            abs_list += [("light blue", f"\nDASM Window Force Mid Address: 0x{self.info_force_address:x}")]
 
         # Bin file
         abs_list += ["\nLoaded Bin:"]
