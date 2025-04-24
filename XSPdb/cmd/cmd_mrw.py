@@ -65,20 +65,24 @@ class CmdMRW:
         """Write memory data
 
         Args:
-            arg (bytes): Memory address and data
+            arg (bytes/number): Memory address and data
         """
         if not arg:
-            message("usage: xmem_write <address> <bytes>")
+            message("usage: xmem_write <address> <bytes/number>")
             return
         args = arg.strip().split()
         if len(args) < 2:
-            message("usage: xmem_write <address> <bytes>")
+            message("usage: xmem_write <address> <bytes/number>")
             return
         try:
             address = int(args[0], 0)
-            data = eval(args[1])
+            if arg[1].startswith("b"):
+                data = eval(args[1])
+            else:
+                byte_count = max(1, len(args[1].replace("0x",""))//2)
+                data = int(args[1], 0).to_bytes(byte_count, byteorder='little', signed=False)
             if not isinstance(data, bytes):
-                error("data must be bytes, eg b'\\x00\\x01...'")
+                error("data must be bytes, eg b'\\x00\\x01...' or hex number")
                 return
             self.api_write_bytes(address, data)
         except Exception as e:
