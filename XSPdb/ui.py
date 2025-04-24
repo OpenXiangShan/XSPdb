@@ -3,6 +3,7 @@ import io
 import sys
 import fcntl
 import signal
+import traceback
 import time
 
 try:
@@ -10,7 +11,7 @@ try:
 except ImportError:
     urwid = None
 
-from XSPdb.cmd.util import GREEN, RESET
+from XSPdb.cmd.util import GREEN, RESET, YELLOW
 
 class XiangShanSimpleTUI:
     def __init__(self, pdb, console_max_height=10, content_asm_fix_width=55, console_prefix="(xiangshan)"):
@@ -188,49 +189,10 @@ class XiangShanSimpleTUI:
             self.content_asm_fix_width += 1
             self.update_top_pane()
         elif key == "tab":
-            if self.last_key == "tab" and self.last_line == line:
-                end_text = ""
-                cmd = self.complete_remain
-                if not cmd:
-                    return
-                if len(cmd) > self.complete_maxshow:
-                    end_text = f"\n...({len(cmd) - self.complete_maxshow} more)"
-                self.console_output.set_text(self._get_output() + self.complete_tips + " ".join(cmd[:self.complete_maxshow]) + end_text)
-                self.complete_remain = cmd[self.complete_maxshow:]
-                return
-            self.complete_remain = []
-            state = 0
-            cmp = []
-            cmd, args, _ = self.pdb.parseline(line)
-            if " " in line:
-                complete_func = getattr(self.pdb, f"complete_{cmd}", None)
-                if complete_func:
-                    arg = args
-                    if " " in args:
-                        arg = args.split()[-1]
-                    idbg = line.find(arg)
-                    cmp = complete_func(arg, line, idbg, len(line))
-            else:
-                while True:
-                    cmp_item = self.pdb.complete(line, state)
-                    if not cmp_item:
-                        break
-                    state += 1
-                    cmp.append(cmp_item)
-            if cmp:
-                prefix = os.path.commonprefix(cmp)
-                full_cmd = line[:line.rfind(" ") + 1] if " " in line else ""
-                if prefix:
-                    full_cmd += prefix
-                else:
-                    full_cmd = line
-                self.console_input.set_edit_text(full_cmd)
-                self.console_input.set_edit_pos(len(full_cmd))
-                end_text = ""
-                if len(cmp) > self.complete_maxshow:
-                    self.complete_remain = cmp[self.complete_maxshow:]
-                    end_text = f"\n...({len(self.complete_remain)} more)"
-                self.console_output.set_text(self._get_output() + self.complete_tips + " ".join(cmp[:self.complete_maxshow]) + end_text)
+            try:
+                self.complete_cmd(line)
+            except Exception as e:
+                self.console_output.set_text(self._get_output(f"{YELLOW}Complete cmd Error: {str(e)}\n{traceback.format_exc()}{RESET}\n"))
         elif key == "up":
             if len(self.cmd_history) > 0:
                 self.cmd_history_index -= 1
@@ -247,6 +209,51 @@ class XiangShanSimpleTUI:
 
         self.last_key = key
         self.last_line = line
+
+    def complete_cmd(self, line):
+        if self.last_key == "tab" and self.last_line == line:
+            end_text = ""
+            cmd = self.complete_remain
+            if not cmd:
+                return
+            if len(cmd) > self.complete_maxshow:
+                end_text = f"\n...({len(cmd) - self.complete_maxshow} more)"
+            self.console_output.set_text(self._get_output() + self.complete_tips + " ".join(cmd[:self.complete_maxshow]) + end_text)
+            self.complete_remain = cmd[self.complete_maxshow:]
+            return
+        self.complete_remain = []
+        state = 0
+        cmp = []
+        cmd, args, _ = self.pdb.parseline(line)
+        if " " in line:
+            complete_func = getattr(self.pdb, f"complete_{cmd}", None)
+            if complete_func:
+                arg = args
+                if " " in args:
+                    arg = args.split()[-1]
+                idbg = line.find(arg)
+                cmp = complete_func(arg, line, idbg, len(line))
+        else:
+            while True:
+                cmp_item = self.pdb.complete(line, state)
+                if not cmp_item:
+                    break
+                state += 1
+                cmp.append(cmp_item)
+        if cmp:
+            prefix = os.path.commonprefix(cmp)
+            full_cmd = line[:line.rfind(" ") + 1] if " " in line else ""
+            if prefix:
+                full_cmd += prefix
+            else:
+                full_cmd = line
+            self.console_input.set_edit_text(full_cmd)
+            self.console_input.set_edit_pos(len(full_cmd))
+            end_text = ""
+            if len(cmp) > self.complete_maxshow:
+                self.complete_remain = cmp[self.complete_maxshow:]
+                end_text = f"\n...({len(self.complete_remain)} more)"
+            self.console_output.set_text(self._get_output() + self.complete_tips + " ".join(cmp[:self.complete_maxshow]) + end_text)
 
     def update_console_ouput(self):
         self.console_output.set_text(self._get_output(self._get_pdb_out()))
