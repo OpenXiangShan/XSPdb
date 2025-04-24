@@ -188,6 +188,19 @@ class XiangShanSimpleTUI:
         elif key == 'ctrl right':
             self.content_asm_fix_width += 1
             self.update_top_pane()
+        elif key == 'ctrl f':
+            current = self.pdb.api_get_info_force_mid_address()
+            if current is None:
+                self.pdb.api_set_info_force_mid_address(self.pdb.api_get_last_info_mid_address())
+            else:
+                self.pdb.api_set_info_force_mid_address(None)
+            self.update_asm_abs_info()
+        elif key == "ctrl u":
+            self.pdb.api_increase_info_force_address(-2)
+            self.update_asm_abs_info()
+        elif key == "ctrl n":
+            self.pdb.api_increase_info_force_address(2)
+            self.update_asm_abs_info()
         elif key == "tab":
             try:
                 self.complete_cmd(line)

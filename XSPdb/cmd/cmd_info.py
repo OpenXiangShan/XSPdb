@@ -16,6 +16,47 @@ class CmdInfo:
         self.info_cached_cmpclist = None
         self.info_watch_list = OrderedDict()
         self.info_force_address = None
+        self.info_last_address = None
+
+    def api_increase_info_force_address(self, deta):
+        """Increase the force mid address for disassembly Info (the disassembly info in the TUI window)
+
+        Args:
+            deta (int): Address to increase
+        """
+        if self.info_force_address is None:
+            return
+        self.info_force_address += deta
+        return self.info_force_address
+
+    def api_get_last_info_mid_address(self):
+        """Get the last mid address of disassembly info
+
+        Returns:
+            int: Address
+        """
+        if self.info_last_address is not None:
+            return self.info_last_address
+        return self.mem_base
+
+    def api_set_info_force_mid_address(self, val):
+        """Set the force mid address for disassembly Info (the disassembly info in the TUI window)
+
+        Args:
+            val (int): Address to force disassembly
+        """
+        if val is not None:
+            self.info_force_address = val
+        else:
+            self.info_force_address = None
+
+    def api_get_info_force_mid_address(self):
+        """Get the force mid address for disassembly Info (the disassembly info in the TUI window)
+
+        Returns:
+            int: Address
+        """
+        return self.info_force_address
 
     def do_xset_dasm_info_force_mid_address(self, arg):
         """Set the force mid address for disassembly Info (the disassembly info in the TUI window)
@@ -25,10 +66,10 @@ class CmdInfo:
         """
         if not arg.strip():
             info("reset dasm info force address to None")
-            self.info_force_address = None
+            self.api_set_info_force_mid_address(None)
             return
         try:
-            self.info_force_address = int(arg, 0)
+            self.api_set_info_force_mid_address(int(arg, 0))
             info(f"force address set to 0x{self.info_force_address:x}")
         except ValueError:
             error(f"Invalid address: {arg}")
@@ -60,6 +101,7 @@ class CmdInfo:
         if self.info_force_address:
             pc_last = self.info_force_address - self.info_force_address % 2
 
+        self.info_last_address = pc_last
         self.info_cached_cmpclist = pc_list.copy()
         # Check the cache first; if not found, generate it
         cache_index = pc_last - pc_last % self.info_cache_bsz
@@ -95,7 +137,8 @@ class CmdInfo:
             if find_pc and l[0] == pc_last:
                 line = ("norm_red", line)
             if self.info_force_address is not None:
-                if l[0] == self.info_force_address:
+                end_addr = l[0] + (2 if "c." in l[2] else 4)
+                if l[0] <= self.info_force_address < end_addr:
                     line = ("light blue", line)
             asm_lines.append(line)
         return asm_lines
