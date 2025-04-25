@@ -60,6 +60,11 @@ class XSPdb(pdb.Pdb):
         cmd_count = self.api_load_custom_pdb_cmds(XSPdb.cmd)
         info(f"Loaded {cmd_count} functions from XSPdb.cmd")
 
+    # override the default PDB function to avoid None cmd error
+    def parseline(self, line):
+        cmd, arg, line = super().parseline(line)
+        return cmd or "", arg, line
+
     def api_load_custom_pdb_cmds(self, path_or_module):
         """Load custom command
 
