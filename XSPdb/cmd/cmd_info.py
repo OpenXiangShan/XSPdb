@@ -87,7 +87,8 @@ class CmdInfo:
         _, h = size
         base_addr = self.mem_base
         pc_list = self.api_commit_pc_list()
-        valid_pc_list = [x[0] for x in pc_list if x[1]]
+        # ignore valid check: valid_pc_list = [x[0] for x in pc_list if x[1]]
+        valid_pc_list = [x[0] for x in pc_list]
         pc_last = base_addr
 
         if self.info_cached_cmpclist:
