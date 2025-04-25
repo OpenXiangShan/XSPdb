@@ -5,6 +5,15 @@ import fcntl
 import signal
 import traceback
 import time
+import select
+
+import ctypes
+libc = ctypes.CDLL(None)
+
+_libc_stdout = ctypes.c_void_p.in_dll(libc, "stdout")
+
+def flush_cpp_stdout():
+    libc.fflush(_libc_stdout)
 
 try:
     import urwid
@@ -36,6 +45,7 @@ class XiangShanSimpleTUI:
         self.complete_tips = "\nAvailable commands:\n"
         self._pdio = io.StringIO()
         self.cpp_stderr_buffer = None
+        self.cpp_stdout_buffer = None
         self.cmd_is_excuting = False
         self.exit_error = None
 
@@ -168,10 +178,34 @@ class XiangShanSimpleTUI:
     def _get_pdb_out(self):
         self._pdio.flush()
         output = self._pdio.getvalue()
-        if self.cpp_stderr_buffer is not None and self.cpp_stderr_buffer.readable():
-            output += self.cpp_stderr_buffer.readline()
-        if self.cpp_stdout_buffer is not None and self.cpp_stdout_buffer.readable():
-            output += self.cpp_stdout_buffer.readline()
+        if self.cpp_stderr_buffer is not None:
+            try:
+                while True:
+                    rlist, _, _ = select.select([self.cpp_stderr_buffer], [], [], 0)
+                    if not rlist:
+                        break
+                    data = os.read(self.cpp_stderr_buffer.fileno(), 4096)
+                    if not data:
+                        break
+                    output += data.decode(errors="replace")
+            except BlockingIOError:
+                pass
+            except Exception:
+                pass
+        if self.cpp_stdout_buffer is not None:
+            try:
+                while True:
+                    rlist, _, _ = select.select([self.cpp_stdout_buffer], [], [], 0)
+                    if not rlist:
+                        break
+                    data = os.read(self.cpp_stdout_buffer.fileno(), 4096)
+                    if not data:
+                        break
+                    output += data.decode(errors="replace")
+            except BlockingIOError:
+                pass
+            except Exception:
+                pass
         self._pdio.truncate(0)
         self._pdio.seek(0)
         return output
@@ -301,6 +335,7 @@ class XiangShanSimpleTUI:
             self.console_output.set_text(self._get_output() + self.complete_tips + " ".join(cmp[:self.complete_maxshow]) + end_text)
 
     def update_console_ouput(self, redirect_stdout=True):
+        flush_cpp_stdout()
         if redirect_stdout:
             self._redirect_stdout(False)
         self.console_output.set_text(self._get_output(self._get_pdb_out()))
@@ -384,6 +419,7 @@ class XiangShanSimpleTUI:
             signal.signal(signal.SIGINT, _sigint_handler)
             self._redirect_stdout(True)
             self.pdb.onecmd(cmd)
+            flush_cpp_stdout()
             self._redirect_stdout(False)
             signal.signal(signal.SIGINT, original_sigint)
             self.cmd_is_excuting = False
