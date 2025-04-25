@@ -128,6 +128,25 @@ class CmdDiffTest:
     def complete_xdifftest_turn_on(self, text, line, begidx, endidx):
         return [x for x in ["on", "off"] if x.startswith(text)] if text else ["on", "off"]
 
+    def do_xdifftest_turn_on_with_ref(self, arg):
+        """Turn on the difftest diff with reference so
+        Args:
+            arg (string): ref so path
+        """
+        if self.difftest_ref_is_inited:
+            error("difftest reference already inited")
+            return
+        if not arg.strip():
+            error("difftest ref so path not found\n usage: xdifftest_turn_on_with_ref <path>")
+            return
+        if not self.api_load_ref_so(arg):
+            error(f"load difftest ref so {arg} failed")
+            return
+        self.api_set_difftest_diff(True)
+
+    def complete_xdifftest_turn_on_with_ref(self, text, line, begidx, endidx):
+        return self.api_complite_localfile(text)
+
     def api_commit_pc_list(self):
         """Get the list of all commit PCs
 
@@ -286,3 +305,33 @@ class CmdDiffTest:
         # remove stepi_check
         self.dut.xclock.RemoveStepRisCbByDesc(cb_key)
         assert cb_key not in self.dut.xclock.ListSteRisCbDesc()
+
+    def api_difftest_get_instance(self, instance=0):
+        """Get the difftest instance
+
+        Args:
+            instance (number): difftest instance to get, default is 0
+        """
+        return self.df.GetDifftest(instance)
+
+    def do_xdifftest_display(self, arg):
+        """Display the difftest status
+
+        Args:
+            arg (number): difftest instance to display, default is 0
+        """
+        instance = 0
+        if arg.strip():
+            try:
+                instance = int(arg)
+            except Exception as e:
+                error(f"convert {arg} to number fail: {str(e)}\n useage: xdifftest_display [instance]")
+                return
+        if not self.difftest_ref_is_inited:
+            error("difftest reference not inited")
+            return
+        x = self.api_difftest_get_instance(instance)
+        if x:
+            x.display()
+        else:
+            error(f"difftest instance {instance} not found")
