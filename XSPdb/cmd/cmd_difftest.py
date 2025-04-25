@@ -1,6 +1,7 @@
 #coding=utf-8
 
-from XSPdb.cmd.util import message, error, warn
+import os
+from XSPdb.cmd.util import message, error, warn, info, GREEN, RESET
 
 class CmdDiffTest:
 
@@ -8,6 +9,124 @@ class CmdDiffTest:
         assert hasattr(self, "difftest_stat"), "difftest_stat not found"
         self.condition_watch_commit_pc = {}    
         self.condition_instrunct_istep = {}
+        self.difftest_ref_so = self.xsp.CString()
+        self.difftest_ref_is_inited = False
+        self.difftest_diff_checker = {}
+        self.difftest_diff_is_run = False
+
+    def api_load_ref_so(self, so_path):
+        """Load the difftest reference shared object
+
+        Args:
+            so_path (string): Path to the shared object
+        """
+        if not os.path.exists(so_path):
+            error(f"file {so_path} not found")
+            return False
+        self.difftest_ref_so.Set(so_path)
+        self.df.SetProxyRefSo(self.difftest_ref_so.CharAddress())
+        info(f"load difftest ref so: {so_path} complete")
+        return True
+
+    def api_get_ref_so_path(self):
+        """Get the path of the difftest reference shared object
+
+        Returns:
+            string: Path to the shared object
+        """
+        return self.difftest_ref_so.Get()
+
+    def api_init_ref(self):
+        """Initialize the difftest reference"""
+        if self.difftest_ref_is_inited:
+            error("difftest reference already inited")
+            return False
+        if self.difftest_ref_so.Get() == "":
+            error("difftest reference so not loaded")
+            return False
+        if not self.mem_inited:
+            error("mem not loaded, please load bin file to mem first")
+            return False
+        self.df.init_device()
+        self.df.GoldenMemInit()
+        self.df.init_nemuproxy(0)
+        self.difftest_ref_is_inited = True
+        return True
+
+    def api_set_difftest_diff(self, turn_on):
+        """Initialize the difftest diff"""
+        if not self.api_init_ref():
+            return False
+        checker = self.difftest_diff_checker.get("checker")
+        if not checker:
+            checker = self.xsp.ComUseCondCheck(self.dut.xclock)
+            tmp_dat = self.xsp.ComUseDataArray(4)
+            checker.SetCondition("diff_test_do_diff_check", tmp_dat.BaseAddr(), tmp_dat.BaseAddr(),
+                                 self.xsp.ComUseCondCmp_NE, 4, 0, 0, 0,
+                                 checker.AsPtrXFunc(self.df.GetFuncAddressOfDifftestStepAndCheck()),
+                                 0)
+            self.difftest_diff_checker["checker"] = checker
+        key = "diff_test_do_diff_check"
+        self.dut.xclock.RemoveStepRisCbByDesc(key)
+        self.difftest_diff_is_run = False
+        if turn_on:
+            self.dut.xclock.StepRis(checker.GetCb(), checker.CSelf(), key)
+            self.difftest_diff_is_run = True
+            info("turn on difftest diff")
+        else:
+            info("turn off difftest diff")
+        return True
+
+    def api_is_difftest_diff_exit(self, show_log=False):
+        """Check if the difftest diff has exited
+
+        Returns:
+            bool: True if exited, False otherwise
+        """
+        if not self.difftest_diff_is_run:
+            return False
+        stat = self.df.GetDifftestStat()
+        if stat == -1:
+            return False
+        if show_log:
+            message(f"{GREEN}Difftest run exit with code: {stat} {RESET}")
+        return True
+
+    def api_is_difftest_diff_run(self):
+        """Check if the difftest diff is running"""
+        return self.difftest_diff_is_run
+
+    def do_xload_difftest_ref_so(self, arg):
+        """Load the difftest reference shared object
+
+        Args:
+            arg (string): Path to the shared object
+        """
+        if not arg.strip():
+            error("difftest ref so path not found\n usage: xload_difftest_ref_so <path>")
+            return
+        if not self.api_load_ref_so(arg):
+            error(f"load difftest ref so {arg} failed")
+            return
+
+    def complete_xload_difftest_ref_so(self, text, line, begidx, endidx):
+        return self.api_complite_localfile(text)
+
+    def do_xdifftest_turn_on(self, arg):
+        """Turn on the difftest diff
+
+        Args:
+            arg (string): Turn on or off
+        """
+        if arg.strip() == "on":
+            self.api_set_difftest_diff(True)
+        elif arg.strip() == "off":
+            self.api_set_difftest_diff(False)
+        else:
+            error("usage: xdifftest_turn_on <on|off>")
+
+    def complete_xdifftest_turn_on(self, text, line, begidx, endidx):
+        return [x for x in ["on", "off"] if x.startswith(text)] if text else ["on", "off"]
 
     def api_commit_pc_list(self):
         """Get the list of all commit PCs

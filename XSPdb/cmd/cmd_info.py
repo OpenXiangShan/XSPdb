@@ -201,6 +201,9 @@ class CmdInfo:
         if self.info_force_address is not None:
             abs_list += [("light blue", f"\nDASM Window Force Mid Address: 0x{self.info_force_address:x}")]
 
+        if self.api_is_difftest_diff_run():
+            abs_list += [("light red", f"\nDifftest run with so: {self.api_get_ref_so_path()})")]
+
         # Bin file
         abs_list += ["\nLoaded Bin:"]
         abs_list += [f"file: {self.exec_bin_file}"]

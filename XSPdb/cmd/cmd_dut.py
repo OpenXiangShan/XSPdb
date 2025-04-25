@@ -150,7 +150,9 @@ class CmdDut:
             fc = getattr(self, "on_update_tstep", None)
             if fc:
                 fc()
-            if self.api_is_hit_good_trap(show_log=True):
+            if self.api_is_difftest_diff_exit(show_log=True):
+                return True
+            elif self.api_is_hit_good_trap(show_log=True):
                 return True
             elif self.api_is_hit_good_loop(show_log=True):
                 return True
