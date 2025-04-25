@@ -88,6 +88,27 @@ class XiangShanSimpleTUI:
         )
         self.loop.draw_screen()
 
+    def _redirect_stdout(self, on):
+        if not hasattr(self, "cpp_stdout_w"):
+            return
+        if on:
+            if not self.cpp_stderr_is_redirected:
+                os.dup2(self.cpp_stdout_w, 1)
+                self.cpp_stderr_is_redirected = True
+        else:
+            if self.cpp_stderr_is_redirected:
+                os.dup2(self.original_cpp_stdout, 1)
+                self.cpp_stderr_is_redirected = False
+
+    def _redirect_stdout_on(self):
+        self.original_cpp_stdout = os.dup(1)
+        out_r, self.cpp_stdout_w = os.pipe()
+        self.cpp_stdout_buffer = os.fdopen(out_r, 'r')
+        self.cpp_stderr_is_redirected = False
+        # ignore redirect here: os.dup2(self.cpp_stdout_w, 1)
+        flags = fcntl.fcntl(self.cpp_stdout_buffer, fcntl.F_GETFL)
+        fcntl.fcntl(self.cpp_stdout_buffer, fcntl.F_SETFL, flags | os.O_NONBLOCK)
+
     def _redirect_stderr_on(self):
         self.original_cpp_stderr = os.dup(2)
         err_r, err_w = os.pipe()
@@ -98,6 +119,7 @@ class XiangShanSimpleTUI:
 
     def _handle_stdout_error(self):
         self._redirect_stderr_on()
+        self._redirect_stdout_on()
         if getattr(self.pdb, "stdout", None):
             self.old_stdout = self.pdb.stdout
             self.pdb.stdout = self._pdio
@@ -122,8 +144,16 @@ class XiangShanSimpleTUI:
             self.cpp_stderr_buffer.close()
             self.cpp_stderr_buffer = None
 
+    def _redirect_stdout_off(self):
+        if self.cpp_stdout_buffer is not None:
+            self._redirect_stdout(False)
+            os.close(self.original_cpp_stdout)
+            self.cpp_stdout_buffer.close()
+            self.cpp_stdout_buffer = None
+
     def _clear_stdout_error(self):
         self._redirect_stderr_off()
+        self._redirect_stdout_off()
         if getattr(self.pdb, "stdout", None):
             self.pdb.stdout = self.old_stdout
             sys.stdout = self.sys_stdout
@@ -140,6 +170,8 @@ class XiangShanSimpleTUI:
         output = self._pdio.getvalue()
         if self.cpp_stderr_buffer is not None and self.cpp_stderr_buffer.readable():
             output += self.cpp_stderr_buffer.readline()
+        if self.cpp_stdout_buffer is not None and self.cpp_stdout_buffer.readable():
+            output += self.cpp_stdout_buffer.readline()
         self._pdio.truncate(0)
         self._pdio.seek(0)
         return output
@@ -268,7 +300,9 @@ class XiangShanSimpleTUI:
                 end_text = f"\n...({len(self.complete_remain)} more)"
             self.console_output.set_text(self._get_output() + self.complete_tips + " ".join(cmp[:self.complete_maxshow]) + end_text)
 
-    def update_console_ouput(self):
+    def update_console_ouput(self, redirect_stdout=True):
+        if redirect_stdout:
+            self._redirect_stdout(False)
         self.console_output.set_text(self._get_output(self._get_pdb_out()))
         if self.console_input_busy_index >= 0:
             self.console_input_busy_index += 1
@@ -276,6 +310,8 @@ class XiangShanSimpleTUI:
             self.console_input.set_caption(self.console_input_busy[n])
         self.loop.screen.clear()
         self.loop.draw_screen()
+        if redirect_stdout:
+            self._redirect_stdout(True)
 
     def process_command(self, cmd):
         if cmd.strip() == ("exit"):
@@ -346,13 +382,15 @@ class XiangShanSimpleTUI:
                 self.pdb.interrupt = True
                 self.console_output.set_text(self._get_output("Ctrl+C, try Exit.\n"))
             signal.signal(signal.SIGINT, _sigint_handler)
+            self._redirect_stdout(True)
             self.pdb.onecmd(cmd)
+            self._redirect_stdout(False)
             signal.signal(signal.SIGINT, original_sigint)
             self.cmd_is_excuting = False
             self.console_input_busy_index = -1
             self.console_input.set_caption(cap)
             self.update_asm_abs_info()
-            self.update_console_ouput()
+            self.update_console_ouput(False)
 
     def update_asm_abs_info(self):
         self.asm_content.clear()
