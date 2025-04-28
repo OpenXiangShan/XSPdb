@@ -3,13 +3,14 @@
 import os
 import subprocess
 import tempfile
-from XSPdb.cmd.util import info, error, message, warn, find_executable_in_dirs
+import fnmatch
+from XSPdb.cmd.util import info, error, message, warn, find_executable_in_dirs, YELLOW, RESET
 
 
 class CmdASM:
     """Assembly command class for disassembling data"""
 
-    def api_asm_str(self, asm_str, entry_address=0x80000000, debug=True, search_dirs=["./ready-to-run"]):
+    def api_asm_str(self, asm_str, entry_address=0x80000000, debug=True, target_secs=[], search_dirs=["./ready-to-run"]):
         """Assemble RISC-V assembly code and return a dict mapping section start addresses to bytes (little-endian).
         Uses riscv64-unknown-elf-gcc and objcopy.
 
@@ -98,12 +99,17 @@ class CmdASM:
                 subprocess.check_call(objcopy_cmd)
                 with open(sec_bin, "rb") as f:
                     data = f.read()
+                if len(target_secs) > 0:
+                    if not any(fnmatch.fnmatch(sec, pattern) for pattern in target_secs):
+                        if debug:
+                            info(f"Section {sec} not matched, skip")
+                        continue
                 result[sec] = (addr, data)
             if debug:
                 message = ""
                 for name, (addr, data) in result.items():
                     message += f"Section[{name}] at {hex(addr)}: {data}\n"
-                info(f"Sections Parsed:\n{message}")
+                info(f"Sections Parsed:\n{message}" + (f"Find {len(result)} sections." if message else f"{YELLOW}No sections found{RESET}"))
             return result
 
     def do_xasm(self, arg, debug=True):
@@ -111,26 +117,37 @@ class CmdASM:
         Uses riscv64-unknown-elf-gcc and objcopy.
 
         Args:
-            entry_addr (int): Entry address for the first section (default self.mem_base (0x80000000)).
+            entry_addr (int): Entry address for the first section (default self.mem_base (0x80000000)). eg <0x80000000>
+            target_secs (list): List of section names to extract (default empty, all sections). eg [.text*, .data*], support wildcards.
             asm_data (str): RISC-V assembly code (can contain multiple .section/.text/.data).
         Returns:
             Dict: {name: (address,bytes)} for each section.
+
+        Examples:
+            xasm <0x80000000> [.text*,.data] addi a0, a0, 1
+            xasm <0x80000000> addi a0, a0, 1
+            xasm [.text*] addi a0, a0, 1
         """
         if not arg:
-            message("usage: xasm [<entry_address>] <asm_data>")
+            message("usage: xasm [<entry_address>] [[sections,...]] <asm_data>")
             return
+        target_secs = []
         arg = arg.strip()
-        asm_str = arg        
         entry_address = self.mem_base
         try:
             if arg.startswith("<"):
                 cmds = arg.split(">", 1)
                 entry_address = int(cmds[0].replace("<", ""), 0)
-                asm_str = cmds[1].strip()
+                arg = cmds[1].strip()
+            if arg.startswith("["):
+                cmds = arg.split("]", 1)
+                target_secs = [s.strip() for s in cmds[0].replace("[", "").split(",")]
+                arg = cmds[1].strip()
+            asm_str = arg
             if not asm_str:
                 message("usage: xasm [<entry_address>] <asm_data>")
                 return
-            return self.api_asm_str(asm_str, entry_address=entry_address, debug=debug)
+            return self.api_asm_str(asm_str, entry_address=entry_address, debug=debug, target_secs=target_secs)
         except Exception as e:
             error(f"asm {arg} fail: {str(e)}")
             return
