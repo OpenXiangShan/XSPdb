@@ -9,7 +9,7 @@ from XSPdb.cmd.util import info, error, message, warn, find_executable_in_dirs
 class CmdASM:
     """Assembly command class for disassembling data"""
 
-    def api_asm_str(self, asm_str, entry_address=0x80000000, debug=True):
+    def api_asm_str(self, asm_str, entry_address=0x80000000, debug=True, search_dirs=["./ready-to-run"]):
         """Assemble RISC-V assembly code and return a dict mapping section start addresses to bytes (little-endian).
         Uses riscv64-unknown-elf-gcc and objcopy.
 
@@ -28,14 +28,11 @@ class CmdASM:
         cmd_prefix = ["riscv64-unknown-elf-", "riscv64-linux-gnu-"]
         for prefix in cmd_prefix:
             if not cmd_gcc:
-                if find_executable_in_dirs(prefix+"gcc", search_dirs=["./ready-to-run"]):
-                    cmd_gcc = prefix + "gcc"
+                cmd_gcc = find_executable_in_dirs(prefix+"gcc", search_dirs = search_dirs)
             if not cmd_objdump:
-                if find_executable_in_dirs(prefix+"objdump", search_dirs=["./ready-to-run"]):
-                    cmd_objdump = prefix + "objdump"
+                cmd_objdump = find_executable_in_dirs(prefix+"objdump", search_dirs = search_dirs)
             if not cmd_objcopy:
-                if find_executable_in_dirs(prefix+"objcopy", search_dirs=["./ready-to-run"]):
-                    cmd_objcopy = prefix + "objcopy"
+                cmd_objcopy = find_executable_in_dirs(prefix+"objcopy", search_dirs = search_dirs)
         if not cmd_gcc:
             error(f"gcc with prefix[{'or'.join(cmd_prefix)}] not found, please install it")
             return None
