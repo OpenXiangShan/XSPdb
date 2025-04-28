@@ -349,7 +349,7 @@ class XiangShanSimpleTUI:
             self._redirect_stdout(True)
 
     def process_command(self, cmd):
-        if cmd.strip() == ("exit"):
+        if cmd.strip() in ("exit", "quit", "q"):
             self.exit()
             return
         elif cmd.startswith("xload_script"):
