@@ -214,9 +214,9 @@ class XiangShanSimpleTUI:
         if clear:
             self.console_outbuffer = txt
         if txt:
-            # FIXME: why need remove duplicated '\n' ?
             buffer = (self.console_outbuffer[-1] if self.console_outbuffer else "") + txt.replace("\t", "    ")
-            buffer = buffer.replace("\n\n", "\n")
+            # FIXME: why need remove duplicated '\n' ?
+            buffer = buffer.replace('\r', "\n").replace("\n\n", "\n")
             if self.console_outbuffer:
                 self.console_outbuffer = self.console_outbuffer[:-1] + buffer
             else:
