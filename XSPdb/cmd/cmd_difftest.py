@@ -36,17 +36,24 @@ class CmdDiffTest:
         """
         return self.difftest_ref_so.Get()
 
-    def api_init_ref(self):
+    def api_init_ref(self, force=False):
         """Initialize the difftest reference"""
         if self.difftest_ref_is_inited:
-            error("difftest reference already inited")
-            return False
+            if not force:
+                error("difftest reference already inited")
+                return False
         if self.difftest_ref_so.Get() == "":
             error("difftest reference so not loaded")
             return False
         if not self.mem_inited:
             error("mem not loaded, please load bin file to mem first")
             return False
+        if force and self.difftest_ref_is_inited:
+            self.df.finish_device()
+            self.df.GoldenMemFinish()
+            self.df.difftest_finish()
+            self.df.difftest_init()
+            self.difftest_stat = self.df.GetDifftest(0).dut
         self.df.init_device()
         self.df.GoldenMemInit()
         self.df.init_nemuproxy(0)
@@ -111,6 +118,25 @@ class CmdDiffTest:
 
     def complete_xload_difftest_ref_so(self, text, line, begidx, endidx):
         return self.api_complite_localfile(text)
+
+    def api_difftest_reset(self):
+        """Reset the difftest"""
+        if self.difftest_ref_is_inited:
+            if self.api_init_ref(force=True):
+                info("difftest reset success")
+                return True
+            else:
+                error("difftest reset failed")
+                return False
+        return True
+
+    def do_xdifftest_reset(self, arg):
+        """Reset the difftest
+
+        Args:
+            arg (None): No arguments
+        """
+        self.api_difftest_reset()
 
     def do_xdifftest_turn_on(self, arg):
         """Turn on the difftest diff

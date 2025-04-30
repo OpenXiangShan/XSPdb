@@ -212,6 +212,7 @@ class CmdDut:
             arg (None): No arguments
         """
         self.api_dut_reset()
+        self.api_difftest_reset()
 
     def do_xwatch(self, arg):
         """Add a watch variable
