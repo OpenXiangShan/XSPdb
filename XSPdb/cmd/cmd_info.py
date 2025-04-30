@@ -87,8 +87,8 @@ class CmdInfo:
         _, h = size
         base_addr = self.mem_base
         pc_list = self.api_commit_pc_list()
-        # ignore valid check: valid_pc_list = [x[0] for x in pc_list if x[1]]
-        valid_pc_list = [x[0] for x in pc_list]
+        # ignore valid check when difftest is run
+        valid_pc_list = [x[0] for x in pc_list if (x[1] or self.api_is_difftest_diff_run())]
         pc_last = base_addr
 
         if self.info_cached_cmpclist:
