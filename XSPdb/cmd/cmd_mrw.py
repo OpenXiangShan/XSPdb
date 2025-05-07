@@ -1,7 +1,7 @@
 #coding = utf-8
 
 
-from XSPdb.cmd.util import error, info, message
+from XSPdb.cmd.util import error, info, message, warn
 
 class CmdMRW:
     """Command class for MRW (Memory Read/Write) operations."""
@@ -46,7 +46,14 @@ class CmdMRW:
             bytes (bytes): Data to write
         """
         if address < self.mem_base:
-            ret = self.api_write_bytes_with_rw(address - self.flash_base,
+            real_address = address - self.flash_base
+            if real_address < 0:
+                warn(f"write address {hex(address)} is not in Flash range, less than {hex(self.flash_base)} ignored")
+                return False
+            if real_address > 0x7FFFFFFF:
+                warn(f"write address {hex(address)} is not in Flash range, bigger than {hex(self.flash_base+ 0x7FFFFFFF)} (max uint32 0x7FFFFFFF) ignored")
+                return False
+            ret = self.api_write_bytes_with_rw(real_address,
                                                 bytes, self.df.FlashRead, self.df.FlashWrite)
         else:
             ret = self.api_write_bytes_with_rw(address,
