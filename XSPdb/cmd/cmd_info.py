@@ -123,9 +123,9 @@ class CmdInfo:
                                                    self.api_all_data_to_asm(cache_index_ext, self.info_cache_bsz))
             self.info_cache_asm[cache_index_ext] = asm_data_ext
             if cache_index_ext < cache_index:
-                asm_data = asm_data_ext + asm_data
+                asm_data = self.api_merge_asm_list_overlap_append(asm_data_ext, asm_data)
             else:
-                asm_data = asm_data + asm_data_ext
+                asm_data = self.api_merge_asm_list_overlap_append(asm_data, asm_data_ext)
 
         # Quickly locate the position of pc_last
         address_list = [x[0] for x in asm_data]

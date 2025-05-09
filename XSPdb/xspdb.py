@@ -12,7 +12,7 @@ from XSPdb.cmd.util import load_module_from_file, load_package_from_dir
 
 class XSPdb(pdb.Pdb):
     def __init__(self, dut, df, xsp, default_file=None,
-                 mem_base=0x80000000, flash_base=0x10000000, defautl_mem_size=1024*1024*1024):
+                 mem_base=0x80000000, flash_base=0x10000000, defautl_mem_size=1024*1024*1024, default_flash_size=0x80000000):
         """Create a PDB debugger for XiangShan
 
         Args:
@@ -29,6 +29,7 @@ class XSPdb(pdb.Pdb):
         self.xsp = xsp
         self.mem_base = mem_base
         self.flash_base = flash_base
+        self.flash_ends = flash_base + default_flash_size
         self.dut_tree = build_prefix_tree(dut.GetInternalSignalList())
         self.prompt = "(XiangShan) "
         self.in_tui = False

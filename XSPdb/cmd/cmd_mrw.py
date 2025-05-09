@@ -45,7 +45,7 @@ class CmdMRW:
             address (int): Target memory address
             bytes (bytes): Data to write
         """
-        if address < self.mem_base:
+        if self.api_is_flash_address(address):
             real_address = address - self.flash_base
             if real_address < 0:
                 warn(f"write address {hex(address)} is not in Flash range, less than {hex(self.flash_base)} ignored")

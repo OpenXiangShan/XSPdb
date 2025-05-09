@@ -1,8 +1,36 @@
 #coding=utf-8
 
-from XSPdb.cmd.util import dasm_bytes, error, message
+from XSPdb.cmd.util import dasm_bytes, error, info, message
 
 class CmdDASM:
+
+    def api_is_flash_address(self, address):
+        """Check if the address is in Flash range
+
+        Args:
+            address (int): Target address
+
+        Returns:
+            bool: True if the address is in Flash range, False otherwise
+        """
+        return self.flash_base <= address < self.flash_ends
+
+    def api_merge_asm_list_overlap_append(self, a, b):
+        if len(b) == 0:
+            return a
+        if len(a) == 0:
+            return b
+        b_head = b[0][0]
+        a_end_index = -1
+        a_size = len(a)
+        while abs(a_end_index) <= a_size:
+            if a[a_end_index][0] < b_head:
+                if a_end_index == -1:
+                    return a + b
+                else:
+                    return a[:a_end_index + 1] + b
+            a_end_index -= 1
+        return b
 
     def api_all_data_to_asm(self, address, length):
         """Convert memory data to assembly instructions
@@ -14,7 +42,18 @@ class CmdDASM:
         Returns:
             list((address, hex, mnemonic, str)): Disassembly results
         """
-        if address < self.mem_base:
+        end_address = address + length
+        if self.api_is_flash_address(address) and \
+           not self.api_is_flash_address(end_address):
+            return self.api_merge_asm_list_overlap_append(self.api_flash_data_to_asm(address, self.flash_ends - address),
+                                                          self.api_mem_data_to_asm(self.flash_ends, end_address - self.flash_ends))
+
+        if not self.api_is_flash_address(address) and \
+           self.api_is_flash_address(end_address):
+            return self.api_merge_asm_list_overlap_append(self.api_mem_data_to_asm(address, self.flash_base - address),
+                                                          self.api_flash_data_to_asm(self.flash_base, end_address - self.flash_base))
+
+        if self.api_is_flash_address(address):
             return self.api_flash_data_to_asm(address, length)
         else:
             return self.api_mem_data_to_asm(address, length)
@@ -107,7 +146,7 @@ class CmdDASM:
         try:
             address = int(args[0], 0)
             length = int(args[1])
-            for l in self.api_mem_data_to_asm(address, length):
+            for l in self.api_all_data_to_asm(address, length):
                 message("0x%x: %s\t%s\t%s" % (l[0], l[1], l[2], l[3]))
         except Exception as e:
             error(f"convert {args[0]} or {args[1]} to number fail: {str(e)}")
