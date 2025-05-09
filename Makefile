@@ -1,14 +1,27 @@
 
 all: test
 
+init:
+	@python3 -m pip install -r requirements.txt
+	@if [ ! -f ready-to-run.tar.gz ]; then \
+		echo "ready-to-run.tar.gz not found, downloading..."; \
+		wget https://github.com/OpenXiangShan/XSPdb/releases/download/v0.1.0-test/ready-to-run.tar.gz; \
+	else \
+		echo "ready-to-run.tar.gz already exists, skipping download."; \
+	fi
+	@if [ ! -f XSPython.tar.gz ]; then \
+		echo "XSPython.tar.gz not found, downloading..."; \
+		wget https://github.com/OpenXiangShan/XSPdb/releases/download/v0.1.0-test/XSPython.tar.gz; \
+	else \
+		echo "XSPython.tar.gz already exists, skipping download."; \
+	fi
+	
 
-ready-to-run:
-	wget https://github.com/OpenXiangShan/XSPdb/releases/download/v0.1.0-test/ready-to-run.tar.gz
+ready-to-run: init
 	tar -xzf ready-to-run.tar.gz
 
 
-XSPython:
-	wget https://github.com/OpenXiangShan/XSPdb/releases/download/v0.1.0-test/XSPython.tar.gz
+XSPython: init
 	tar -xzf XSPython.tar.gz
 
 
