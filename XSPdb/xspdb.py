@@ -7,12 +7,12 @@ import os
 import inspect
 import pkgutil
 
-from XSPdb.cmd.util import message, info, error, build_prefix_tree, register_commands, YELLOW, RESET, set_log, set_log_file
+from XSPdb.cmd.util import message, info, error, warn, build_prefix_tree, register_commands, YELLOW, RESET, set_log, set_log_file
 from XSPdb.cmd.util import load_module_from_file, load_package_from_dir
 
 class XSPdb(pdb.Pdb):
     def __init__(self, dut, df, xsp, default_file=None,
-                 mem_base=0x80000000, flash_base=0x10000000, defautl_mem_size=1024*1024*1024, default_flash_size=0x80000000):
+                 mem_base=0x80000000, flash_base=0x10000000, defautl_mem_size=1024*1024*1024, default_flash_size=0x10000000):
         """Create a PDB debugger for XiangShan
 
         Args:
@@ -41,11 +41,11 @@ class XSPdb(pdb.Pdb):
         self.exec_bin_file = default_file
         self.mem_size = defautl_mem_size
         self.mem_inited = False
+        self.xapi_update_pmem_base_and_first_inst_addr(self.mem_base, self.mem_base)
         if self.exec_bin_file:
             assert os.path.exists(self.exec_bin_file), "file %s not found" % self.exec_bin_file
             info("load: %s" % self.exec_bin_file)
-            self.df.InitRam(self.exec_bin_file, self.mem_size)
-            self.mem_inited = True
+            self.xapi_init_mem()
         self.df.InitFlash("")
         self.xspdb_init_bin = "xspdb_flash_init.bin"
         self.flash_bin_file = None
@@ -55,6 +55,37 @@ class XSPdb(pdb.Pdb):
         self.register_map = OrderedDict()
         self.load_cmds()
         self.api_init_waveform()
+
+    def xapi_init_mem(self):
+        """Initialize memory"""
+        if self.mem_inited:
+            return
+        self.df.InitRam(self.exec_bin_file, self.mem_size)
+        self.mem_inited = True
+
+    def xapi_update_pmem_base_and_first_inst_addr(self, a, b):
+        """Set diftest PMEM_BASE and FIRST_INST_ADDRESS
+
+        Args:
+            a (int): PMEM_BASE value
+            b (int): FIRST_INST_ADDRESS value
+        Returns:
+            (PMEM_BASE, FIRST_INST_ADDRESS): current value of PMEM_BASE and FIRST_INST_ADDRESS
+        """
+        if not hasattr(self.df, "Set_PMEM_BASE"):
+            warn("difftest.Set_PMEM_BASE not found, update your difftest")
+            warn("ignore memory PMEM_BASE set")
+            return None, None
+        if a is not None:
+            self.df.Set_PMEM_BASE(a)
+        if b is not None:
+            self.df.Set_FIRST_INST_ADDRESS(b)
+        x, y = self.df.Get_PMEM_BASE(), self.df.Get_FIRST_INST_ADDRESS()
+        if a is not None:
+            info("Set PMEM_BASE to %s (Current: %s)" % (hex(a), hex(x)))
+        if b is not None:
+            info("Set FIRST_INST_ADDRESS to %s (Current: %s)" % (hex(b), hex(y)))
+        return x, y
 
     def load_cmds(self):
         import XSPdb.cmd

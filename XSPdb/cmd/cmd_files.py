@@ -14,12 +14,11 @@ class CmdFiles:
             bin_file (string): Path to the bin file
         """
         assert os.path.exists(bin_file), "file %s not found" % bin_file
+        self.exec_bin_file = bin_file
         if self.mem_inited:
             self.df.overwrite_ram(bin_file, self.mem_size)
         else:
-            self.df.InitRam(bin_file, self.mem_size)
-            self.mem_inited = True
-        self.exec_bin_file = bin_file
+            self.xapi_init_mem()
         self.info_cache_asm.clear()
 
     def api_export_flash(self, bin_file):

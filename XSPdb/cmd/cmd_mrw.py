@@ -94,3 +94,164 @@ class CmdMRW:
             self.api_write_bytes(address, data)
         except Exception as e:
             error(f"convert {args[0]} or {args[1]} to number/bytes fail: {str(e)}")
+
+    def xapi_read_bytes_with_func(self, address, size, read_func):
+        """Read memory data
+
+        Args:
+            address (int): Memory address
+            size (int): Size of data to read
+            read_func (callable): raw read funciton
+        Return:
+            bytes
+        """
+        read_data = bytearray()
+        read_count = size//8 + 1
+        start_address = address - address % 8
+        start_offset  = address - start_address
+        for index in range(read_count):
+            padd = start_address + 8*index
+            read_data += read_func(padd).to_bytes(8, byteorder='little', signed=False)
+        return read_data[start_offset: start_offset + size]
+
+    def xapi_read_bytes_from(self, address, size):
+        """Read memory data
+
+        Args:
+            address (int): Memory address
+            size (int): Size of data to read
+        Return:
+            bytes
+        """
+        if not self.mem_inited:
+            error(f"memory is not inited")
+            return None
+        end_address = address + size
+        if ((self.api_is_flash_address(address) and not self.api_is_flash_address(end_address))) or \
+           (not self.api_is_flash_address(address) and self.api_is_flash_address(end_address)):
+            error(f"read address {hex(address)} and {hex(end_address)} not in same range (overlaped with flash and mem)")
+            return None
+        if self.api_is_flash_address(address):
+            def _flash_read(addr):
+                return self.df.FlashRead(max(0, addr - self.flash_base))
+            return self.xapi_read_bytes_with_func(address, size, _flash_read)
+        else:
+            return self.xapi_read_bytes_with_func(address, size, self.df.pmem_read)
+
+    def do_xmem_copy(self, arg):
+        """copy memory data from one address to another
+
+        Args:
+            source (int): Source address
+            target (int): Target address
+            size (int): Size of data to copy
+        """
+        if not arg:
+            message("usage: xmem_copy <source> <target> <size>")
+            return
+        args = arg.strip().split()
+        if len(args) < 3:
+            message("usage: xmem_copy <source> <target> <size>")
+            return
+        try:
+            source = int(args[0], 0)
+            target = int(args[1], 0)
+            size = int(args[2], 0)
+            if size <= 0:
+                error("size must be > 0")
+                return
+            data = self.xapi_read_bytes_from(source, size)
+            if data is None:
+                error(f"read {size} bytes from address {hex(source)} fail")
+                return
+            self.api_write_bytes(target, data)
+        except Exception as e:
+            error(f"convert {args[0]} or {args[1]} or {args[2]} to number fail: {str(e)}")
+
+    def do_xmem_copy_range_to(self, arg):
+        """copy memory data from one address to another
+        Args:
+            source_start (int): Source address start
+            source_emd (int): Source address end
+            target (int): Target address
+        """
+        if not arg:
+            message("usage: xmem_copy_range_to <source_start> <source_end> <target>")
+            return
+        args = arg.strip().split()
+        if len(args) < 3:
+            message("usage: xmem_copy_range_to <source_start> <source_end> <target>")
+            return
+        try:
+            source_start = int(args[0], 0)
+            source_end = int(args[1], 0)
+            target = int(args[2], 0)
+            size = source_end - source_start
+            if size <= 0:
+                error("size must be > 0")
+                return
+            data = self.xapi_read_bytes_from(source_start, size)
+            if data is None:
+                error(f"read {size} bytes from address {hex(source_start)} fail")
+                return
+            self.api_write_bytes(target, data)
+        except Exception as e:
+            error(f"convert {args[0]} or {args[1]} or {args[2]} to number fail: {str(e)}")
+
+    def do_xmem_read(self, arg):
+        """copy memory data from one address to another
+
+        Args:
+            source (int): Source address
+            target (int): Target address
+            size (int): Size of data to copy
+        """
+        if not arg:
+            error("usage: xmem_read <source> <size>")
+            return
+        args = arg.strip().split()
+        if len(args) < 2:
+            error("usage: xmem_read <source> <size>")
+            return
+        try:
+            addr = int(args[0], 0)
+            size = int(args[1], 0)
+            if size <= 0:
+                error("read size need > 0")
+                return
+            data = self.xapi_read_bytes_from(addr, size)
+            if data is None:
+                error(f"read None from {hex(addr), hex(addr + size)}")
+                return
+            message("data bytes(%d): %s"%(len(data), data))
+        except Exception as e:
+            error(f"convert {args[0]} or {args[1]} to number fail: {str(e)}")
+
+    def do_xmem_read_range(self, arg):
+        """Read memory data from one address to another
+
+        Args:
+            source_start (int): Source address start
+            source_end (int): Source address end
+        """
+        if not arg:
+            message("usage: xmem_read_range <source_start> <source_end>")
+            return
+        args = arg.strip().split()
+        if len(args) < 2:
+            message("usage: xmem_read_range <source_start> <source_end>")
+            return
+        try:
+            source_start = int(args[0], 0)
+            source_end = int(args[1], 0)
+            size = source_end - source_start
+            if size <= 0:
+                error("size must be > 0")
+                return
+            data = self.xapi_read_bytes_from(source_start, size)
+            if data is None:
+                error(f"read {size} bytes from address {hex(source_start)} fail")
+                return
+            message("data bytes(%d): %s"%(len(data), data))
+        except Exception as e:
+            error(f"convert {args[0]} or {args[1]} to number fail: {str(e)}")

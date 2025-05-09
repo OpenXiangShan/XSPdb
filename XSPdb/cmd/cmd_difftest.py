@@ -361,3 +361,31 @@ class CmdDiffTest:
             x.display()
         else:
             error(f"difftest instance {instance} not found")
+
+    def do_xdifftest_pmem_base_first_instr_address(self, arg):
+        """Display or set PMEM_BASE, FIRST_INST_ADDRESS
+
+        Args:
+            PMEM_BASE (int): PMEM_BASE value default None
+            FIRST_INST_ADDRESS (int): FIRST_INST_ADDRESS value default None
+        """
+        a, b = None, None
+        str_usage = "usage xdifftest_pmem_base_first_instr_address [PMEM_BASE FIRST_INST_ADDRESS]"
+        if arg.strip():
+            args = arg.split()
+            if len(args) != 2:
+                error(str_usage)
+                return
+            try:
+                a, b = int(args[0], 0), int(args[1], 0)
+            except Exception as e:
+                error("Error: %s\n%s"%(e, str_usage))
+                return
+        x, y = self.xapi_update_pmem_base_and_first_inst_addr(a, b)
+        if (a is not None) and (b is not None):
+            message("PMEM_BASE = %s, FIRST_INST_ADDRESS = %s" % (hex(x), hex(y)))
+        elif (a and a != x) or (b and b != y):
+            error("Set PMEM_BASE(%s != %s), FIRST_INST_ADDRESS(%s != %s) fail!" % (a, x, b, y))
+        else:
+            message("PMEM_BASE = %s, FIRST_INST_ADDRESS = %s" % (hex(x), hex(y)))
+            error(str_usage)
