@@ -18,11 +18,21 @@ init:
 	
 
 ready-to-run: init
-	tar -xzf ready-to-run.tar.gz
+	@if [ ! -d ready-to-run ]; then \
+		echo "ready-to-run directory not found, extracting..."; \
+		tar -xzf ready-to-run.tar.gz; \
+	else \
+		echo "ready-to-run directory already exists, skipping extraction."; \
+	fi
 
 
 XSPython: init
-	tar -xzf XSPython.tar.gz
+	@if [ ! -d XSPython ]; then \
+		echo "XSPython directory not found, extracting..."; \
+		tar -xzf XSPython.tar.gz; \
+	else \
+		echo "XSPython directory already exists, skipping extraction."; \
+	fi
 
 
 test: XSPython ready-to-run
