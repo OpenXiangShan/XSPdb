@@ -2,6 +2,7 @@
 
 
 from XSPdb.cmd.util import error, info, message, warn
+import struct
 
 class CmdMRW:
     """Command class for MRW (Memory Read/Write) operations."""
@@ -255,3 +256,85 @@ class CmdMRW:
             message("data bytes(%d): %s"%(len(data), data))
         except Exception as e:
             error(f"convert {args[0]} or {args[1]} to number fail: {str(e)}")
+
+    def api_get_call_stack(self, sp, pc, max_depth=10):
+        """Get call stack from address
+
+        Args:
+            sp (int): Stack pointer address
+            pc (int): Program counter address
+            max_depth (int): Maximum depth of call stack
+        Returns:
+            list: List of call stack addresses
+        """
+        callstack = [(0, pc, sp, self.xapi_address_to_symbol(pc))]
+        if not self.mem_inited:
+            return None
+        for depth in range(max_depth):
+            try:
+                ra_bytes = self.xapi_read_bytes_from(sp + 8, 8)
+                if ra_bytes is None:
+                    break
+                if len(ra_bytes) != 8:
+                    error("  [!] Failed to read memory at 0x{:x}".format(sp + 8))
+                    break
+                ra_val = struct.unpack("<Q", ra_bytes)[0]
+                if ra_val == 0 or ra_val == pc:
+                    break
+                sp_bytes = self.xapi_read_bytes_from(sp, 8)
+                if sp_bytes is None:
+                    break
+                if len(sp_bytes) != 8:
+                    break
+                sp = struct.unpack("<Q", sp_bytes)[0]
+                callstack.append((depth + 1, ra_val, sp, self.xapi_address_to_symbol(ra_val)))
+                pc = ra_val
+            except Exception as e:
+                error(f"  [!] Exception: {e}")
+                break
+        return callstack
+
+    def api_get_current_call_stack(self, max_depth=10):
+        """Get current call stack from address
+
+        Returns:
+            list: List of call stack addresses
+        """
+        if not self.mem_inited:
+            error("mem not inited, please load a bin file")
+            return None
+        sp = self.xsp.GetFromU64Array(self.difftest_stat.regs_int.value, self.iregs_mapk["sp"])
+        pc = self.api_info_get_last_commit_pc()
+        return self.api_get_call_stack(sp, pc, max_depth)
+
+    def do_xback_trace(self, arg):
+        """Get call stack from address
+
+        Args:
+            pc (int): Stack pointer address, default is current pc
+            sp (int): Program counter address, default is current sp
+        """
+        args = arg.strip()
+        sp = None
+        pc = None
+        if args:
+            args = args.split()
+            if len(args) > 0:
+                pc = args[0]
+            if len(args) > 1:
+                sp = args[1]
+        try:
+            if sp is None:
+                sp = self.xsp.GetFromU64Array(self.difftest_stat.regs_int.value, self.iregs_mapk["sp"])
+            else:
+                sp = int(sp, 0)
+            if pc is None:
+                pc = self.api_info_get_last_commit_pc()
+            else:
+                pc = int(pc, 0)
+            callstack = self.api_get_call_stack(sp, pc)
+            for depth, ra, sp, name in callstack:
+                message("Call Stack:")
+                message(f"depth {depth}: ra: {hex(ra)}, sp: {hex(sp)}, name: {name}")
+        except Exception as e:
+            error(f"convert args{arg} to pc or sp number fail: {str(e)}")
