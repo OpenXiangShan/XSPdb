@@ -58,6 +58,18 @@ class CmdInfo:
         """
         return self.info_force_address
 
+    def api_info_get_last_commit_pc(self):
+        """Get the last commit PC
+
+        Returns:
+            int: Address
+        """
+        istep_pc = self.api_get_istep_last_commit_pc()
+        if len(istep_pc) != 0:
+            return max(istep_pc)
+        valid_pc_list = [x[0] for x in self.api_commit_pc_list() if (x[1] or self.api_is_difftest_diff_run())]
+        return max(valid_pc_list) if valid_pc_list else self.mem_base
+
     def do_xset_dasm_info_force_mid_address(self, arg):
         """Set the force mid address for disassembly Info (the disassembly info in the TUI window)
 
