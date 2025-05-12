@@ -1,12 +1,7 @@
-import sys
-import signal
+#coding=utf-8
+
 from XSPython import DUTSimTop, difftest as df, xsp
 from XSPdb import *
-
-def handle_sigint(signum, frame):
-    print("\nReceived SIGINT, exit.")
-    sys.exit(0)
-signal.signal(signal.SIGINT, handle_sigint)
 
 def test_sim_top():
     dut = DUTSimTop()
