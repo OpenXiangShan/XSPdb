@@ -42,11 +42,11 @@ class XSPdb(pdb.Pdb):
         self.exec_bin_file = default_file
         self.mem_size = defautl_mem_size
         self.mem_inited = False
-        self.xapi_update_pmem_base_and_first_inst_addr(self.mem_base, self.mem_base)
+        self.api_update_pmem_base_and_first_inst_addr(self.mem_base, self.mem_base)
         if self.exec_bin_file:
             assert os.path.exists(self.exec_bin_file), "file %s not found" % self.exec_bin_file
             info("load: %s" % self.exec_bin_file)
-            self.xapi_init_mem()
+            self.api_init_mem()
         self.df.InitFlash("")
         self.xspdb_init_bin = "xspdb_flash_init.bin"
         self.flash_bin_file = None
@@ -57,14 +57,14 @@ class XSPdb(pdb.Pdb):
         self.load_cmds()
         self.api_init_waveform()
 
-    def xapi_init_mem(self):
+    def api_init_mem(self):
         """Initialize memory"""
         if self.mem_inited:
             return
         self.df.InitRam(self.exec_bin_file, self.mem_size)
         self.mem_inited = True
 
-    def xapi_update_pmem_base_and_first_inst_addr(self, a, b):
+    def api_update_pmem_base_and_first_inst_addr(self, a, b):
         """Set diftest PMEM_BASE and FIRST_INST_ADDRESS
 
         Args:

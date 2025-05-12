@@ -408,7 +408,7 @@ class CmdDiffTest:
             except Exception as e:
                 error("Error: %s\n%s"%(e, str_usage))
                 return
-        x, y = self.xapi_update_pmem_base_and_first_inst_addr(a, b)
+        x, y = self.api_update_pmem_base_and_first_inst_addr(a, b)
         if (a is not None) and (b is not None):
             message("PMEM_BASE = %s, FIRST_INST_ADDRESS = %s" % (hex(x), hex(y)))
         elif (a and a != x) or (b and b != y):

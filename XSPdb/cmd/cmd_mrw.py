@@ -96,7 +96,7 @@ class CmdMRW:
         except Exception as e:
             error(f"convert {args[0]} or {args[1]} to number/bytes fail: {str(e)}")
 
-    def xapi_read_bytes_with_func(self, address, size, read_func):
+    def api_read_bytes_with_func(self, address, size, read_func):
         """Read memory data
 
         Args:
@@ -115,7 +115,7 @@ class CmdMRW:
             read_data += read_func(padd).to_bytes(8, byteorder='little', signed=False)
         return read_data[start_offset: start_offset + size]
 
-    def xapi_read_bytes_from(self, address, size):
+    def api_read_bytes_from(self, address, size):
         """Read memory data
 
         Args:
@@ -135,9 +135,9 @@ class CmdMRW:
         if self.api_is_flash_address(address):
             def _flash_read(addr):
                 return self.df.FlashRead(max(0, addr - self.flash_base))
-            return self.xapi_read_bytes_with_func(address, size, _flash_read)
+            return self.api_read_bytes_with_func(address, size, _flash_read)
         else:
-            return self.xapi_read_bytes_with_func(address, size, self.df.pmem_read)
+            return self.api_read_bytes_with_func(address, size, self.df.pmem_read)
 
     def do_xmem_copy(self, arg):
         """copy memory data from one address to another
@@ -161,7 +161,7 @@ class CmdMRW:
             if size <= 0:
                 error("size must be > 0")
                 return
-            data = self.xapi_read_bytes_from(source, size)
+            data = self.api_read_bytes_from(source, size)
             if data is None:
                 error(f"read {size} bytes from address {hex(source)} fail")
                 return
@@ -191,7 +191,7 @@ class CmdMRW:
             if size <= 0:
                 error("size must be > 0")
                 return
-            data = self.xapi_read_bytes_from(source_start, size)
+            data = self.api_read_bytes_from(source_start, size)
             if data is None:
                 error(f"read {size} bytes from address {hex(source_start)} fail")
                 return
@@ -220,7 +220,7 @@ class CmdMRW:
             if size <= 0:
                 error("read size need > 0")
                 return
-            data = self.xapi_read_bytes_from(addr, size)
+            data = self.api_read_bytes_from(addr, size)
             if data is None:
                 error(f"read None from {hex(addr), hex(addr + size)}")
                 return
@@ -249,7 +249,7 @@ class CmdMRW:
             if size <= 0:
                 error("size must be > 0")
                 return
-            data = self.xapi_read_bytes_from(source_start, size)
+            data = self.api_read_bytes_from(source_start, size)
             if data is None:
                 error(f"read {size} bytes from address {hex(source_start)} fail")
                 return
@@ -267,12 +267,12 @@ class CmdMRW:
         Returns:
             list: List of call stack addresses
         """
-        callstack = [(0, pc, sp, self.xapi_address_to_symbol(pc))]
+        callstack = [(0, pc, sp, self.api_address_to_symbol(pc))]
         if not self.mem_inited:
             return None
         for depth in range(max_depth):
             try:
-                ra_bytes = self.xapi_read_bytes_from(sp + 8, 8)
+                ra_bytes = self.api_read_bytes_from(sp + 8, 8)
                 if ra_bytes is None:
                     break
                 if len(ra_bytes) != 8:
@@ -281,13 +281,13 @@ class CmdMRW:
                 ra_val = struct.unpack("<Q", ra_bytes)[0]
                 if ra_val == 0 or ra_val == pc:
                     break
-                sp_bytes = self.xapi_read_bytes_from(sp, 8)
+                sp_bytes = self.api_read_bytes_from(sp, 8)
                 if sp_bytes is None:
                     break
                 if len(sp_bytes) != 8:
                     break
                 sp = struct.unpack("<Q", sp_bytes)[0]
-                callstack.append((depth + 1, ra_val, sp, self.xapi_address_to_symbol(ra_val)))
+                callstack.append((depth + 1, ra_val, sp, self.api_address_to_symbol(ra_val)))
                 pc = ra_val
             except Exception as e:
                 error(f"  [!] Exception: {e}")

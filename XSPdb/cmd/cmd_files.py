@@ -18,7 +18,7 @@ class CmdFiles:
         if self.mem_inited:
             self.df.overwrite_ram(bin_file, self.mem_size)
         else:
-            self.xapi_init_mem()
+            self.api_init_mem()
         self.info_cache_asm.clear()
 
     def api_export_flash(self, bin_file):
