@@ -13,6 +13,8 @@ class CmdDiffTest:
         self.difftest_ref_is_inited = False
         self.difftest_diff_checker = {}
         self.difftest_diff_is_run = False
+        self.istep_last_commit_pc = []
+        self.data_last_symbol_block = -1
 
     def api_load_ref_so(self, so_path):
         """Load the difftest reference shared object
@@ -279,6 +281,27 @@ class CmdDiffTest:
             self.condition_watch_commit_pc.clear()
             message("No commit pc to wathc, remove checker")
 
+    def api_istep_update_commit_pc(self):
+        old_p = self.condition_instrunct_istep.get("pc_old_list")
+        new_P = self.condition_instrunct_istep.get("pc_lst_list")
+        if not (old_p and new_P):
+            self.istep_last_commit_pc = []
+        else:
+            self.istep_last_commit_pc = []
+            for i in range(8):
+                old_pc = int.from_bytes(old_p[i].AsBytes(), byteorder='little', signed=False)
+                new_pc = int.from_bytes(new_P[i].AsBytes(), byteorder='little', signed=False)
+                if old_pc != new_pc:
+                    self.istep_last_commit_pc.append(new_pc)
+
+    def api_get_istep_last_commit_pc(self):
+        """Get the last commit PC after instruction step
+
+        Returns:
+            list: List of commit PCs
+        """
+        return self.istep_last_commit_pc.copy()
+
     def do_xistep(self, arg):
         """Step through instructions
 
@@ -316,18 +339,22 @@ class CmdDiffTest:
         update_pc_func = self.condition_instrunct_istep["pc_sync_list"]
         update_pc_func()
         for i in range(instr_count):
-            v = self.api_step_dut(10000)
             update_pc_func()
+            v = self.api_step_dut(10000)
             if self.api_is_hit_good_trap():
                 break
             elif self.api_is_hit_good_loop():
+                break
+            elif self.api_is_difftest_diff_exit():
                 break
             if v == 10000:
                 warn("step %d cycles complete, but no instruction commit find" % v)
             if self.interrupt:
                 break
             if self.dut.xclock.IsDisable():
-                break
+                self.api_istep_update_commit_pc()
+                self.data_last_symbol_block = self.api_echo_pc_symbol_block_change(max(self.api_get_istep_last_commit_pc() + [-1]),
+                                                                                   self.data_last_symbol_block)
         # remove stepi_check
         self.dut.xclock.RemoveStepRisCbByDesc(cb_key)
         assert cb_key not in self.dut.xclock.ListSteRisCbDesc()
