@@ -50,6 +50,22 @@ def set_log_file(log_file:str):
         ch.setFormatter(formatter)
         logger.addHandler(ch)
 
+_XSPDB_LOG_LEVEL = logging.DEBUG
+
+def set_xspdb_log_level(level):
+    """
+    Set the log level for XSPdb.
+
+    Args:
+        level (int): Log level to set. Use logging.DEBUG, logging.INFO, etc.
+    """
+    global _XSPDB_LOG_LEVEL
+    global logger
+    _XSPDB_LOG_LEVEL = level
+    if logger is not None:
+        logger.setLevel(level)
+        for handler in logger.handlers:
+            handler.setLevel(level)
 
 def message(*a, **k):
     """Print a message"""
@@ -59,27 +75,31 @@ def message(*a, **k):
 
 def info(msg):
     """Print information"""
-    print(f"{GREEN}[Info] %s{RESET}" % msg)
+    if _XSPDB_LOG_LEVEL <= logging.INFO:
+        print(f"{GREEN}[Info] %s{RESET}" % msg)
     if log:
         logger.info("[Info] %s" % msg)
 
 def debug(msg):
     """Print debug information"""
-    print("[Debug] %s" % msg)
+    if _XSPDB_LOG_LEVEL <= logging.DEBUG:
+        print("[Debug] %s" % msg)
     if log:
         logger.debug("[Debug] %s" % msg)
 
 def error(msg):
     """Print error information"""
-    print(f"{RED}[Error] %s{RESET}" % msg)
+    if _XSPDB_LOG_LEVEL <= logging.ERROR:
+        print(f"{RED}[Error] %s{RESET}" % msg)
     if log:
         logger.error("[Error] %s" % msg)
 
 def warn(msg):
     """Print warning information"""
-    print(f"{YELLOW}[Warn] %s{RESET}" % msg)
+    if _XSPDB_LOG_LEVEL <= logging.WARNING:
+        print(f"{YELLOW}[Warn] %s{RESET}" % msg)
     if log:
-        logger.warn("[Warn] %s" % msg)
+        logger.warning("[Warn] %s" % msg)
 
 def build_prefix_tree(signals):
     tree = {}

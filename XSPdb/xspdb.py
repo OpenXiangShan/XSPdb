@@ -8,7 +8,8 @@ import inspect
 import pkgutil
 
 from XSPdb.cmd.util import message, info, error, warn, build_prefix_tree, register_commands, YELLOW, RESET, set_log, set_log_file
-from XSPdb.cmd.util import load_module_from_file, load_package_from_dir
+from XSPdb.cmd.util import load_module_from_file, load_package_from_dir, set_xspdb_log_level
+from logging import DEBUG, INFO, WARNING, ERROR
 
 class XSPdb(pdb.Pdb):
     def __init__(self, dut, df, xsp, default_file=None,
@@ -141,6 +142,31 @@ class XSPdb(pdb.Pdb):
     def complete_xuse_custom_cmds(self, text, line, begidx, endidx):
         """Complete the custom command file or directory"""
         return self.api_complite_localfile(text)
+
+    def do_xset_log_level(self, arg):
+        """Set log level
+
+        Args:
+            arg (string): Log level
+        """
+        if not arg:
+            message("usage: xset_log_level <log level>, log level can be debug, info, warn, error")
+            return
+        level = arg.strip().lower()
+        level_map = {
+            "debug": DEBUG,
+            "info": INFO,
+            "warn": WARNING,
+            "error": ERROR
+        }
+        if level not in level_map:
+            message("usage: xset_log_level <log level>, log level can be debug, info, warn, error")
+            return
+        set_xspdb_log_level(level_map[level])
+
+    def complete_xset_log_level(self, text, line, begidx, endidx):
+        """Complete the log level"""
+        return [k for k in ["debug", "info", "warn", "error"] if k.startswith(text)]
 
     def do_xexportself(self, var):
         """Set a variable to XSPdb self
