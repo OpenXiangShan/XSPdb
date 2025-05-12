@@ -267,28 +267,23 @@ class CmdMRW:
         Returns:
             list: List of call stack addresses
         """
-        callstack = [(0, pc, sp, self.api_address_to_symbol(pc))]
+        callstack = [(-1, pc, sp, self.api_address_to_symbol(pc))]
         if not self.mem_inited:
             return None
         for depth in range(max_depth):
             try:
-                ra_bytes = self.api_read_bytes_from(sp + 8, 8)
-                if ra_bytes is None:
-                    break
-                if len(ra_bytes) != 8:
-                    error("  [!] Failed to read memory at 0x{:x}".format(sp + 8))
-                    break
-                ra_val = struct.unpack("<Q", ra_bytes)[0]
-                if ra_val == 0 or ra_val == pc:
-                    break
                 sp_bytes = self.api_read_bytes_from(sp, 8)
-                if sp_bytes is None:
+                ra_bytes = self.api_read_bytes_from(sp + 8, 8)
+                if (sp_bytes is None or ra_bytes is None) or (len(sp_bytes) != 8 or len(ra_bytes) != 8):
+                    error("  [!] Failed to read memory at 0x{:x} or 0x{:x}".format(sp, sp + 8))
                     break
-                if len(sp_bytes) != 8:
+                next_sp = struct.unpack("<Q", sp_bytes)[0]
+                ra_val = struct.unpack("<Q", ra_bytes)[0]
+                if ra_val == 0 or ra_val == pc or next_sp == 0 or next_sp == sp:
                     break
-                sp = struct.unpack("<Q", sp_bytes)[0]
-                callstack.append((depth + 1, ra_val, sp, self.api_address_to_symbol(ra_val)))
+                callstack.append((depth, ra_val, next_sp, self.api_address_to_symbol(ra_val)))
                 pc = ra_val
+                sp = next_sp
             except Exception as e:
                 error(f"  [!] Exception: {e}")
                 break
@@ -333,8 +328,13 @@ class CmdMRW:
             else:
                 pc = int(pc, 0)
             callstack = self.api_get_call_stack(sp, pc)
-            for depth, ra, sp, name in callstack:
-                message("Call Stack:")
-                message(f"depth {depth}: ra: {hex(ra)}, sp: {hex(sp)}, name: {name}")
+            if not callstack:
+                error("get call stack fail")
+                return
+            _, pc, sp, name = callstack[0]
+            message(f"Backtrace from (pc: {hex(pc)}, sp: {hex(sp)}) location: {name}")
+            message("Call Stack:")
+            for depth, ra, sp, name in callstack[1:]:
+                message(f"> depth {depth}: ra: {hex(ra)}, sp: {hex(sp)}, at: {name}")
         except Exception as e:
             error(f"convert args{arg} to pc or sp number fail: {str(e)}")
