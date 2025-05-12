@@ -145,7 +145,8 @@ class CmdDut:
             warn("mem not inited, please load bin file first")
         def check_break():
             if self.dut.xclock.IsDisable():
-                info("Find break point, break (step %d cycles)" % (self.dut.xclock.clk - c_count))
+                info("Find break point, break (step %d cycles) at cycle: %d (%s)" % (self.dut.xclock.clk - c_count,
+                                                                                     self.dut.xclock.clk, hex(self.dut.xclock.clk)))
                 return True
             fc = getattr(self, "on_update_tstep", None)
             if fc:
@@ -161,7 +162,7 @@ class CmdDut:
             return False
         self.dut.xclock.Enable()
         assert not self.dut.xclock.IsDisable(), "clock is disable"
-        self.interrupt = False
+        self.interrupt = False # interrupt from outside by user
         batch, offset = cycle//batch_cycle, cycle % batch_cycle
         c_count = self.dut.xclock.clk
         for i in range(batch):
@@ -169,7 +170,6 @@ class CmdDut:
                 break
             self.dut.Step(batch_cycle)
             if check_break():
-                self.interrupt = True
                 break
         if not self.interrupt and not self.dut.xclock.IsDisable():
             self.dut.Step(offset)
