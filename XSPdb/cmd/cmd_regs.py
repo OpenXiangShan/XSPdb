@@ -16,6 +16,10 @@ class CmdRegs:
                       "s0",   "s1", "a0", "a1",  "a2", "a3", "a4", "a5",
                       "a6",   "a7", "s2", "s3",  "s4", "s5", "s6", "s7",
                       "s8",   "s9", "s10","s11", "t3", "t4", "t5", "t6"]
+        self.iregs_mapk = {k: i for i, k in enumerate(self.iregs)}
+        self.iregs_mapv = {i: k for i, k in enumerate(self.iregs)}
+        self.fregs_mapk = {k: i for i, k in enumerate(self.fregs)}
+        self.fregs_mapv = {i: k for i, k in enumerate(self.fregs)}
         self.mpc_iregs = self.iregs.copy()
         self.mpc_iregs[0] = "mpc"
 
