@@ -28,13 +28,17 @@ class XiangShanSimpleTUI:
         self.summary_info = urwid.SimpleListWalker([])
         self.pdb = pdb
         self.pdb.on_update_tstep = self.update_console_ouput
-        self.console_input = urwid.Edit(u"%s"%console_prefix)
+        self.console_input_cap = u"%s"%console_prefix
+        self.console_input = urwid.Edit(self.console_input_cap)
         self.console_input_busy = ["(wait.  )", "(wait.. )", "(wait...)"]
         self.console_input_busy_index = -1
         self.console_default_txt = "\n\n\n\n"
         self.console_outbuffer = self.console_default_txt;
         self.console_output = ANSIText(self.console_outbuffer)
         self.console_max_height = console_max_height
+        self.console_page_cache = None
+        self.console_page_cache_index = 0
+        self.console_page_scroll_enable = True
         self.content_asm_fix_width = content_asm_fix_width
         self.cmd_history = []
         self.cmd_history_index = 0
@@ -227,6 +231,8 @@ class XiangShanSimpleTUI:
     def handle_input(self, key):
         line = self.console_input.get_edit_text().lstrip()
         if key == 'enter':
+            if self.console_page_cache is not None:
+                return
             cmd = line
             self.console_input.set_edit_text('')
             self.process_command(cmd)
@@ -235,6 +241,8 @@ class XiangShanSimpleTUI:
                     self.cmd_history.append(cmd)
                 self.cmd_history_index = len(self.cmd_history)
         elif key == 'esc':
+            if self.console_output_page_scroll("exit_page"):
+                return
             self.exit()
         elif key == 'ctrl up':
             self.console_max_height += 1
@@ -273,12 +281,16 @@ class XiangShanSimpleTUI:
             except Exception as e:
                 self.console_output.set_text(self._get_output(f"{YELLOW}Complete cmd Error: {str(e)}\n{traceback.format_exc()}{RESET}\n"))
         elif key == "up":
+            if self.console_output_page_scroll(1):
+                return
             if len(self.cmd_history) > 0:
                 self.cmd_history_index -= 1
                 self.cmd_history_index = max(0, self.cmd_history_index)
                 self.console_input.set_edit_text(self.cmd_history[self.cmd_history_index])
                 self.console_input.set_edit_pos(len(self.cmd_history[self.cmd_history_index]))
         elif key == "down":
+            if self.console_output_page_scroll(-1):
+                return
             if len(self.cmd_history) > 0:
                 self.cmd_history_index += 1
                 if self.cmd_history_index >= len(self.cmd_history) - 1:
@@ -334,11 +346,41 @@ class XiangShanSimpleTUI:
                 end_text = f"\n...({len(self.complete_remain)} more)"
             self.console_output.set_text(self._get_output() + self.complete_tips + " ".join(cmp[:self.complete_maxshow]) + end_text)
 
+    def console_output_page_scroll(self, deta):
+        if self.console_page_cache is None:
+            return False
+        if deta  == "exit_page":
+            if self.console_page_cache is not None:
+                self.console_page_cache = None
+                self.console_page_cache_index = 0
+                self.console_output.set_text(self._get_output())
+                self.console_input.set_caption(self.console_input_cap)
+                self.root.focus_part = 'footer'
+        else:
+            self.console_page_cache_index += deta
+            self.console_page_cache_index = min(self.console_page_cache_index, len(self.console_page_cache) - self.console_max_height)
+            self.console_page_cache_index = max(self.console_page_cache_index, 0)
+        self.update_console_ouput(False)
+        return True
+
     def update_console_ouput(self, redirect_stdout=True):
         flush_cpp_stdout()
         if redirect_stdout:
             self._redirect_stdout(False)
-        self.console_output.set_text(self._get_output(self._get_pdb_out()))
+        if self.console_page_cache is not None:
+            pindex = self.console_page_cache_index
+            text_data = "\n"+"\n".join(self.console_page_cache[pindex:pindex + self.console_max_height])
+        else:
+            text_data = self._get_pdb_out()
+            text_lines = text_data.split("\n")
+            # just check the last output check
+            if len(text_lines) > self.console_max_height and redirect_stdout == False and self.console_page_scroll_enable == True:
+                self.console_page_cache = text_lines
+                self.console_page_cache_index = 0
+                text_data = "\n"+"\n".join(text_lines[:self.console_max_height])
+                self.console_input.set_caption(f"<Up/Down: scroll, Esc: exit>")
+                self.root.focus_part = None
+        self.console_output.set_text(self._get_output(text_data))
         if self.console_input_busy_index >= 0:
             self.console_input_busy_index += 1
             n = self.console_input_busy_index % len(self.console_input_busy)
