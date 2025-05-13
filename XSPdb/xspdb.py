@@ -13,22 +13,30 @@ from logging import DEBUG, INFO, WARNING, ERROR
 
 class XSPdb(pdb.Pdb):
     def __init__(self, dut, df, xsp, default_file=None,
-                 mem_base=0x80000000, flash_base=0x10000000, defautl_mem_size=1024*1024*1024, default_flash_size=0x10000000):
+                 mem_base=0x80000000,
+                 flash_base=0x10000000,
+                 finstr_addr=None,
+                 defautl_mem_size=1024*1024*1024,
+                 default_flash_size=0x10000000,
+                 ):
         """Create a PDB debugger for XiangShan
-
         Args:
             dut (DUT): DUT exported by picker
             df (difftest): Difftest exported from DUT Python library
             xsp (xspcomm): xspcomm exported from DUT Python library
             default_file (string): Default bin file to load
             mem_base (int): Memory base address
+            finstr_addr (int): First instruction address
             flash_base (int): Flash base address
+            defautl_mem_size (int): Default memory size
+            default_flash_size (int): Default flash size
         """
         super().__init__()
         self.dut = dut
         self.df = df
         self.xsp = xsp
         self.mem_base = mem_base
+        self.finstr_addr = mem_base if finstr_addr is None else finstr_addr
         self.flash_base = flash_base
         self.flash_ends = flash_base + default_flash_size
         self.dut_tree = build_prefix_tree(dut.GetInternalSignalList())
@@ -42,7 +50,7 @@ class XSPdb(pdb.Pdb):
         self.exec_bin_file = default_file
         self.mem_size = defautl_mem_size
         self.mem_inited = False
-        self.api_update_pmem_base_and_first_inst_addr(self.mem_base, self.mem_base)
+        self.api_update_pmem_base_and_first_inst_addr(self.mem_base, self.finstr_addr)
         if self.exec_bin_file:
             assert os.path.exists(self.exec_bin_file), "file %s not found" % self.exec_bin_file
             info("load: %s" % self.exec_bin_file)
