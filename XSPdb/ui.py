@@ -52,6 +52,7 @@ class XiangShanSimpleTUI:
         self.cpp_stdout_buffer = None
         self.cmd_is_excuting = False
         self.exit_error = None
+        self.batch_mode_depth = 0
 
         self.file_list = urwid.ListBox(self.asm_content)
         self.summary_pile = urwid.ListBox(self.summary_info)
@@ -390,6 +391,17 @@ class XiangShanSimpleTUI:
         if redirect_stdout:
             self._redirect_stdout(True)
 
+    def batch_mode_enter(self):
+        if self.batch_mode_depth == 0:
+            self.console_page_scroll_enable = False
+        self.batch_mode_depth += 1
+
+    def batch_mode_exit(self):
+        self.batch_mode_depth -= 1
+        if self.batch_mode_depth == 0:
+            self.console_page_scroll_enable = True
+        self.batch_mode_depth = max(0, self.batch_mode_depth)
+
     def process_command(self, cmd):
         if cmd.strip() in ("exit", "quit", "q"):
             self.exit()
@@ -406,6 +418,7 @@ class XiangShanSimpleTUI:
             if not os.path.exists(script_file):
                 self.console_output.set_text(self._get_output(f"Error: Script file {script_file} not found.\n"))
                 return
+            self.batch_mode_enter()
             with open(script_file, "r") as f:
                 for line in f.readlines():
                     line = line.strip()
@@ -417,6 +430,7 @@ class XiangShanSimpleTUI:
                         continue
                     self.process_command(line)
                     time.sleep(gap_time)
+            self.batch_mode_exit()
 
         elif cmd.startswith("xload_log"):
             args = cmd.strip().split()
@@ -430,18 +444,17 @@ class XiangShanSimpleTUI:
             if not os.path.exists(log_file):
                 self.console_output.set_text(self._get_output(f"Error: Log file {log_file} not found.\n"))
                 return
+            self.batch_mode_enter()
             with open(log_file, "r") as f:
                 for line in f.readlines():
-                    
                     line = line[line.find(']')+1:].strip()
-                    
                     if not line.startswith("------onecmd:"):
                         continue
-                    
                     line = line.split("------onecmd:")[1].strip()
                     if line:
                         self.process_command(line)
                     time.sleep(gap_time)
+            self.batch_mode_exit()
 
         elif cmd == "clear":
             self.console_output.set_text(self._get_output(self.console_default_txt, clear=True))
