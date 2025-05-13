@@ -258,7 +258,7 @@ class CmdMRW:
             error(f"convert {args[0]} or {args[1]} to number fail: {str(e)}")
 
     def api_get_call_stack(self, sp, pc, max_depth=10):
-        """Get call stack from address
+        """[FIXME: this implementation is incorrect] Get call stack from address
 
         Args:
             sp (int): Stack pointer address
