@@ -303,10 +303,10 @@ class CmdDiffTest:
         return self.istep_last_commit_pc.copy()
 
     def do_xistep(self, arg):
-        """Step through instructions
+        """Step through instructions, stop when find instruction commit
 
         Args:
-            instr_count (int): Number of instructions
+            instr_count (int): Number of steps to take
         """
         arg = arg.strip()
         instr_count = 1
