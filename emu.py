@@ -145,8 +145,13 @@ def main(args, xspdb):
             try:
                 old_step(1)
             except KeyboardInterrupt:
+                xspdb.interrupt = True
                 XSPdb.warn("[Ctrl+C] Entering interactive debug mode")
-                xspdb.set_trace()
+                if getattr(xspdb,  "__xspdb_set_traced__", None) is None:
+                    xspdb.set_trace()
+                    setattr(xspdb, "__xspdb_set_traced__", True)
+                else:
+                    break
     xspdb.dut.Step = new_step
     if not args.image:
         XSPdb.warn("No image to execute, Entering the interactive debug mode")
