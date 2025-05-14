@@ -243,7 +243,7 @@ class CmdDut:
             error(f"watch {key} not found")
 
     def complete_xwatch(self, text, line, begidx, endidx):
-        cmp = get_completions(self.dut_tree, text)
+        cmp = get_completions(self.get_dut_tree(), text)
         return cmp
 
     def complete_xunwatch(self, text, line, begidx, endidx):
@@ -272,7 +272,7 @@ class CmdDut:
             pin.value = pin_value
 
     def complete_xset(self, text, line, begidx, endidx):
-        cmp = get_completions(self.dut_tree, text)
+        cmp = get_completions(self.get_dut_tree(), text)
         return cmp
 
     def do_xstep(self, arg):
@@ -308,7 +308,7 @@ class CmdDut:
             message(f"value: {hex(sig.value)}  width: {sig.W()}")
 
     def complete_xprint(self, text, line, begidx, endidx):
-        cmp = get_completions(self.dut_tree, text)
+        cmp = get_completions(self.get_dut_tree(), text)
         return cmp
 
     def do_xbreak(self, arg):
@@ -347,7 +347,7 @@ class CmdDut:
         cmd_list = [c for c in line.strip().split() if c]
         if (len(cmd_list) == 2 and line.endswith(" ")) or (len(cmd_list) == 3 and not line.endswith(" ")):
                 return [k for k in ["eq", "ne", "gt", "lt", "ge", "le", "ch"] if k.startswith(cmd)]
-        return get_completions(self.dut_tree, text)
+        return get_completions(self.get_dut_tree(), text)
 
     def do_xunbreak(self, arg):
         """Remove a breakpoint on a signal

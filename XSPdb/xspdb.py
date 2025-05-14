@@ -39,7 +39,7 @@ class XSPdb(pdb.Pdb):
         self.finstr_addr = mem_base if finstr_addr is None else finstr_addr
         self.flash_base = flash_base
         self.flash_ends = flash_base + default_flash_size
-        self.dut_tree = build_prefix_tree(dut.GetInternalSignalList())
+        self.dut_tree = None
         self.prompt = "(XiangShan) "
         self.in_tui = False
         # Init dut uart echo
@@ -64,6 +64,13 @@ class XSPdb(pdb.Pdb):
         self.register_map = OrderedDict()
         self.load_cmds()
         self.api_init_waveform()
+
+    def get_dut_tree(self):
+        """Get the DUT tree"""
+        if self.dut_tree is None:
+            info("First time to use DUTree, build it ...")
+            self.dut_tree = build_prefix_tree(self.dut.GetInternalSignalList())
+        return self.dut_tree
 
     def api_init_mem(self):
         """Initialize memory"""
