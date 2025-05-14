@@ -302,20 +302,14 @@ class CmdDiffTest:
         """
         return self.istep_last_commit_pc.copy()
 
-    def do_xistep(self, arg):
+    def api_xistep(self, instr_count):
         """Step through instructions, stop when find instruction commit
 
         Args:
-            instr_count (int): Number of steps to take
+            step_count (int): Number of steps to take
+        Returns:
+            step_taken (int)
         """
-        arg = arg.strip()
-        instr_count = 1
-        try:
-            instr_count = 1 if not arg else int(arg)
-        except Exception as e:
-            error(f"convert {arg} to number fail: {str(e)}")
-            return
-
         if not self.condition_instrunct_istep:
             checker = self.xsp.ComUseCondCheck(self.dut.xclock)
             self.condition_instrunct_istep["checker"] = checker
@@ -338,6 +332,7 @@ class CmdDiffTest:
         self.dut.xclock.StepRis(checker.GetCb(), checker.CSelf(), cb_key)
         update_pc_func = self.condition_instrunct_istep["pc_sync_list"]
         update_pc_func()
+        step_taken = 0
         for i in range(instr_count):
             update_pc_func()
             v = self.api_step_dut(10000)
@@ -347,17 +342,35 @@ class CmdDiffTest:
                 break
             elif self.api_is_difftest_diff_exit():
                 break
-            if v == 10000:
-                warn("step %d cycles complete, but no instruction commit find" % v)
             if self.interrupt:
                 break
-            if self.dut.xclock.IsDisable():
+            elif self.dut.xclock.IsDisable():
                 self.api_istep_update_commit_pc()
                 self.data_last_symbol_block = self.api_echo_pc_symbol_block_change(max(self.api_get_istep_last_commit_pc() + [-1]),
                                                                                    self.data_last_symbol_block)
+            elif v == 10000:
+                warn("step %d cycles complete, but no instruction commit find" % v)
+                step_taken -= 1 # ignore record
+            step_taken += 1
         # remove stepi_check
         self.dut.xclock.RemoveStepRisCbByDesc(cb_key)
         assert cb_key not in self.dut.xclock.ListSteRisCbDesc()
+        return step_taken
+
+    def do_xistep(self, arg):
+        """Step through instructions, stop when find instruction commit
+
+        Args:
+            step_count (int): Number of steps to take
+        """
+        arg = arg.strip()
+        instr_count = 1
+        try:
+            instr_count = 1 if not arg else int(arg)
+        except Exception as e:
+            error(f"convert {arg} to number fail: {str(e)}")
+            return
+        return self.api_xistep(instr_count)
 
     def api_difftest_get_instance(self, instance=0):
         """Get the difftest instance

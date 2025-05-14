@@ -16,7 +16,7 @@ class XSPdb(pdb.Pdb):
                  mem_base=0x80000000,
                  flash_base=0x10000000,
                  finstr_addr=None,
-                 defautl_mem_size=1024*1024*1024,
+                 default_mem_size=1024*1024*1024, # 1GB
                  default_flash_size=0x10000000,
                  ):
         """Create a PDB debugger for XiangShan
@@ -28,7 +28,7 @@ class XSPdb(pdb.Pdb):
             mem_base (int): Memory base address
             finstr_addr (int): First instruction address
             flash_base (int): Flash base address
-            defautl_mem_size (int): Default memory size
+            default_mem_size (int): Default memory size
             default_flash_size (int): Default flash size
         """
         super().__init__()
@@ -48,7 +48,7 @@ class XSPdb(pdb.Pdb):
         self.dut.StepRis(self.c_stderr_echo.GetCb(), self.c_stderr_echo.CSelf(), "uart_echo")
         # Init difftest
         self.exec_bin_file = default_file
-        self.mem_size = defautl_mem_size
+        self.mem_size = default_mem_size
         self.mem_inited = False
         self.api_update_pmem_base_and_first_inst_addr(self.mem_base, self.finstr_addr)
         if self.exec_bin_file:
@@ -158,6 +158,23 @@ class XSPdb(pdb.Pdb):
         """Complete the custom command file or directory"""
         return self.api_complite_localfile(text)
 
+    def api_set_debug_level(self, level):
+        """Set log level
+
+        Args:
+            level (string): Log level
+        """
+        level_map = {
+            "debug": DEBUG,
+            "info": INFO,
+            "warn": WARNING,
+            "error": ERROR
+        }
+        if level not in level_map:
+            return False
+        set_xspdb_log_level(level_map[level])
+        return True
+
     def do_xset_log_level(self, arg):
         """Set log level
 
@@ -168,16 +185,8 @@ class XSPdb(pdb.Pdb):
             message("usage: xset_log_level <log level>, log level can be debug, info, warn, error")
             return
         level = arg.strip().lower()
-        level_map = {
-            "debug": DEBUG,
-            "info": INFO,
-            "warn": WARNING,
-            "error": ERROR
-        }
-        if level not in level_map:
+        if not self.api_set_debug_level(level):
             message("usage: xset_log_level <log level>, log level can be debug, info, warn, error")
-            return
-        set_xspdb_log_level(level_map[level])
 
     def complete_xset_log_level(self, text, line, begidx, endidx):
         """Complete the log level"""

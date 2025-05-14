@@ -21,22 +21,24 @@ class CmdFiles:
             self.api_init_mem()
         self.info_cache_asm.clear()
 
-    def api_export_flash(self, bin_file):
+    def api_export_flash(self, bin_file, force_size=-1):
         """Export Flash data
 
         Args:
             bin_file (string): Path to the export file
         """
-        if not self.api_check_if_xspdb_init_bin_loaded():
-            return
+        if force_size < 0:
+            if not self.api_check_if_xspdb_init_bin_loaded():
+                return
         # search mret
         mret = 0x30200073
         last_data = 0
         bin_data = bytearray()
-        for i in range(1024*10):
+        bin_size = force_size if force_size > 0 else 1024*10
+        for i in range(bin_size):
             data = self.df.FlashRead(i*8)
             bin_data += data.to_bytes(8, byteorder='little', signed=False)
-            if last_data >> 32 == mret or last_data & 0xffffffff == mret:
+            if (last_data >> 32 == mret or last_data & 0xffffffff == mret) and force_size < 0:
                 break
             last_data = data
         with open(bin_file, "wb") as f:
@@ -202,12 +204,21 @@ class CmdFiles:
         """Export Flash data to a file
 
         Args:
-            arg (string): Path to the export file
+            path (string): Path to the export file
+            force_size (int): N*8 bytes to force export
         """
         if not arg:
-            message("usage: xexport_flash <file>")
+            message("usage: xexport_flash <file> [force_size]")
             return
-        self.api_export_flash(arg)
+        args = arg.split()
+        path = args[0]
+        fsiz = -1
+        try:
+            if len(args) > 0:
+                fsiz = int(args[1], 0)
+            self.api_export_flash(path, fsiz)
+        except Exception as e:
+            error(f"{e}\n usage: xexport_flash <file> [force_size]")
 
     def complete_xexport_flash(self, text, line, begidx, endidx):
         return  self.api_complite_localfile(text)
