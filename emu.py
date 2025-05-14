@@ -91,7 +91,7 @@ def parse_mem_size(size_str):
 def run_script(xspdb, script_path):
     xspdb.api_set_init_cmd("xload_script %s 0.1"%script_path)
     xspdb.set_trace()
-    return True
+    return False
 
 
 def run_replay(xspdb, replay_path):
