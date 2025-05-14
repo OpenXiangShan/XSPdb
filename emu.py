@@ -179,7 +179,7 @@ def main(args, xspdb):
         ("interact_at", args.interact_at),
     ], key=lambda x: x[1])
     pre_cycle_index = 0
-    if args.interact_at < 0:
+    if args.interact_at == pre_cycle_index:
         xspdb.set_trace()
     for k, v in step_block:
         if v < pre_cycle_index:
