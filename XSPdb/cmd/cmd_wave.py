@@ -25,22 +25,43 @@ class CmdTrap:
         """
         return self.waveform_on
 
+    def api_waveform_on(self, wave_file=""):
+        """Start waveform recording
+
+        Args:
+            wave_file (str): Waveform file path [optional]
+        """
+        if self.waveform_on:
+            info("waveform is already on")
+            return True
+        if wave_file:
+            if not os.path.isabs(wave_file):
+                error(f"waveform file[{wave_file}] name must be a ligal path")
+                return False
+            self.dut.CloseWaveform(wave_file)
+        self.dut.OpenWaveform()
+        self.waveform_on = True
+        return True
+
+    def api_waveform_off(self):
+        """Close waveform recording"""
+        if not self.waveform_on:
+            info("waveform is already off")
+            return True
+        self.dut.CloseWaveform()
+        self.waveform_on = False
+        return True
+
     def do_xwave_on(self, arg):
         """Start waveform recording
 
         Args:
            name (str): Waveform file path [optional]
         """
-        wave_file = arg.strip()
-        if wave_file:
-            if not os.path.isabs(wave_file):
-                error(f"waveform file[{arg}] name must be a ligal path")
-                message("usage: xwave_on [waveform file path]")
-                return
-            self.dut.CloseWaveform(wave_file)
-        self.dut.OpenWaveform()
-        self.waveform_on = True
-        info("waveform on")
+        if self.api_waveform_on(arg):
+            info("waveform on")
+        else:
+            message("usage: xwave_on [waveform file path]")
 
     def do_xwave_off(self, arg):
         """Close waveform recording
@@ -48,8 +69,7 @@ class CmdTrap:
         Args:
             arg (None): No arguments
         """
-        self.dut.CloseWaveform()
-        self.waveform_on = False
+        self.api_waveform_off()
         info("waveform off")
 
     def do_xwave_flush(self, arg):
