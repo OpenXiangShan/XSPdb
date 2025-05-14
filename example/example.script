@@ -1,3 +1,4 @@
+xload ready-to-run/microbench.bin
 xflash ready-to-run/xspdb_flash_init.bin  # load lash
 xset_ireg mpc 0x800116b0
 xload_reg_file example/example.reg
