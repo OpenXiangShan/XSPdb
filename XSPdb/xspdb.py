@@ -64,6 +64,7 @@ class XSPdb(pdb.Pdb):
         self.register_map = OrderedDict()
         self.load_cmds()
         self.api_init_waveform()
+        self.init_cmd = None
 
     def get_dut_tree(self):
         """Get the DUT tree"""
@@ -310,3 +311,14 @@ class XSPdb(pdb.Pdb):
             return
         set_log_file(arg)
         info("Set log file to %s" % arg)
+
+    def interaction(self, frame, traceback):
+        if self.init_cmd:
+            self.setup(frame, traceback)
+            cmd = self.init_cmd
+            self.init_cmd = None
+            self.onecmd(cmd)
+        return super().interaction(frame, traceback)
+
+    def api_set_init_cmd(self, cmd):
+        self.init_cmd = cmd

@@ -249,15 +249,22 @@ class CmdFiles:
         """Load an XSPdb script
 
         Args:
-            arg (string): Path to the script file
+            script (string): Path to the script file
+            delay_time (float): time delay between each cmd
         """
+        usage = "usage: xload_script <script_file> [delay_time]"
         if not arg:
-            message("usage: xload_script <script_file>")
+            message(usage)
             return
-        if not os.path.exists(arg):
-            error(f"{arg} not found")
-            return
-        error("Please call this function in TUI")
+        args = arg.split()
+        path = args[0]
+        delay = 0.2
+        if len(args) > 1:
+            try:
+                delay = float(args[1])
+            except Exception as e:
+                error("convert dalay fail: %s, from args: %s\n%s" % (e, arg, usage))
+        self.api_exec_script(path, gap_time=delay)
 
     def complete_xload_script(self, text, line, begidx, endidx):
         return self.api_complite_localfile(text)

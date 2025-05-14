@@ -89,7 +89,8 @@ def parse_mem_size(size_str):
 
 
 def run_script(xspdb, script_path):
-    xspdb.warn("run_script it to be done!")
+    xspdb.api_set_init_cmd("xload_script %s 0.1"%script_path)
+    xspdb.set_trace()
     return True
 
 
@@ -201,5 +202,9 @@ def main(args, xspdb):
 
 if __name__ == "__main__":
     args, xspdb = create_xspdb()
-    main(args, xspdb)
-    XSPdb.info("Exit.")
+    import bdb
+    try:
+        main(args, xspdb)
+        XSPdb.info("Exit.")
+    except bdb.BdbQuit:
+        pass

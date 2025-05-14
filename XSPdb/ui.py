@@ -412,24 +412,14 @@ class XiangShanSimpleTUI:
                 self.console_output.set_text(self._get_output("Usage: xload_script <script_file> [gap_time]\n"))
                 return
             script_file = args[1]
-            gap_time = 0
+            gap_time = 0.2
             if len(args) > 2:
                 gap_time = float(args[2])
             if not os.path.exists(script_file):
                 self.console_output.set_text(self._get_output(f"Error: Script file {script_file} not found.\n"))
                 return
             self.batch_mode_enter()
-            with open(script_file, "r") as f:
-                for line in f.readlines():
-                    line = line.strip()
-                    if line.startswith("#"):
-                        continue
-                    tag = "__sharp_tag_%s__" % str(time.time())
-                    line = line.replace("\#", tag).split("#")[0].replace(tag, "#").strip()
-                    if not line:
-                        continue
-                    self.process_command(line)
-                    time.sleep(gap_time)
+            self.pdb.api_exec_script(script_file, gap_time=gap_time, cmd_handler=self._exec_cmd)
             self.batch_mode_exit()
 
         elif cmd.startswith("xload_log"):
@@ -461,27 +451,30 @@ class XiangShanSimpleTUI:
         elif cmd in ["continue", "c", "count"]:
             self.console_output.set_text(self._get_output("continue/c/count is not supported in TUI\n"))
         else:
-            self.console_output.set_text(self._get_output(cmd + "\n"))
-            cap = self.console_input.caption
-            self.console_input_busy_index = 0
-            self.console_input.set_caption(self.console_input_busy[self.console_input_busy_index])
-            self.loop.draw_screen()
-            self.cmd_is_excuting = True
-            original_sigint = signal.getsignal(signal.SIGINT)
-            def _sigint_handler(s, f):
-                self.pdb.interrupt = True
-                self.console_output.set_text(self._get_output("Ctrl+C, try Exit.\n"))
-            signal.signal(signal.SIGINT, _sigint_handler)
-            self._redirect_stdout(True)
-            self.pdb.onecmd(cmd)
-            flush_cpp_stdout()
-            self._redirect_stdout(False)
-            signal.signal(signal.SIGINT, original_sigint)
-            self.cmd_is_excuting = False
-            self.console_input_busy_index = -1
-            self.console_input.set_caption(cap)
-            self.update_asm_abs_info()
-            self.update_console_ouput(False)
+            self._exec_cmd(cmd)
+
+    def _exec_cmd(self, cmd):
+        self.console_output.set_text(self._get_output(cmd + "\n"))
+        cap = self.console_input.caption
+        self.console_input_busy_index = 0
+        self.console_input.set_caption(self.console_input_busy[self.console_input_busy_index])
+        self.loop.draw_screen()
+        self.cmd_is_excuting = True
+        original_sigint = signal.getsignal(signal.SIGINT)
+        def _sigint_handler(s, f):
+            self.pdb.interrupt = True
+            self.console_output.set_text(self._get_output("Ctrl+C, try Exit.\n"))
+        signal.signal(signal.SIGINT, _sigint_handler)
+        self._redirect_stdout(True)
+        self.pdb.onecmd(cmd)
+        flush_cpp_stdout()
+        self._redirect_stdout(False)
+        signal.signal(signal.SIGINT, original_sigint)
+        self.cmd_is_excuting = False
+        self.console_input_busy_index = -1
+        self.console_input.set_caption(cap)
+        self.update_asm_abs_info()
+        self.update_console_ouput(False)
 
     def update_asm_abs_info(self):
         self.asm_content.clear()
