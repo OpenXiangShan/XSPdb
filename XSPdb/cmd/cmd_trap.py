@@ -10,7 +10,6 @@ class CmdTrap:
         assert hasattr(self, "dut"), "this class must be used in XSPdb, canot be used alone"
         self.condition_good_trap = {}
         self.break_on_trap = {}
-        self.api_init_good_trap()
 
     def api_init_good_trap(self):
         """Initialize the good trap"""
@@ -22,7 +21,7 @@ class CmdTrap:
             target_trap_vali = self.xsp.ComUseDataArray(1)
             target_trap_code = self.xsp.ComUseDataArray(8)
             target_trap_vali.FromBytes(int(0).to_bytes(1, byteorder='little', signed=False))
-            target_trap_code.FromBytes(int(0).to_bytes(8, byteorder='little', signed=False))
+            target_trap_code.FromBytes(int(0).to_bytes(8, byteorder='little', signed=False)) #FIXME: is the good trap code zero ?
             source_trap_code = self.xsp.ComUseDataArray(self.difftest_stat.trap.get_code_address(), 8)
             source_trap_vali = self.xsp.ComUseDataArray(self.difftest_stat.trap.get_hasTrap_address(), 1)
             checker.SetCondition("good_trap", source_trap_code.BaseAddr(), target_trap_code.BaseAddr(), self.xsp.ComUseCondCmp_EQ, 8,
