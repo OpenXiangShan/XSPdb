@@ -208,9 +208,9 @@ def main(args, xspdb):
         XSPdb.warn("No image to execute, Entering the interactive debug mode")
         xspdb.set_trace()
     delta = args.max_cycles
-    while delta > 0:
+    while delta > 0 and not xspdb.api_dut_is_step_exit():
         delta = delta - emu_step(delta)
-    XSPdb.info("Finish all cycles (%d)" % args.max_cycles)
+    XSPdb.info("Finished cycles: %d (%d ignored)" % (args.max_cycles - delta, delta))
 
 
 if __name__ == "__main__":
