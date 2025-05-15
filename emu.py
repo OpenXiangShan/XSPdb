@@ -160,10 +160,6 @@ def main(args, xspdb):
         c = xspdb.api_step_dut(delta)
         check_is_need_trace(xspdb)
         return c
-    if not args.image:
-        XSPdb.warn("No image to execute, Entering the interactive debug mode")
-        xspdb.set_trace()
-        return
     if args.log_begin != args.log_end:
         if args.dump_wave:
             if args.log_begin == 0:
@@ -207,6 +203,9 @@ def main(args, xspdb):
     if args.pc_commits != 0:
         return run_commits(xspdb, args.pc_commits)
     if args.interact_at == 0:
+        xspdb.set_trace()
+    if not args.image:
+        XSPdb.warn("No image to execute, Entering the interactive debug mode")
         xspdb.set_trace()
     delta = args.max_cycles
     while delta > 0:
