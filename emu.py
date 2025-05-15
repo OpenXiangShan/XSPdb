@@ -91,6 +91,7 @@ def parse_mem_size(size_str):
 
 def run_script(xspdb, script_path):
     xspdb.api_set_init_cmd("xload_script %s 0.1"%script_path)
+    xspdb.set_trace()
     return False
 
 
@@ -103,10 +104,10 @@ def run_commits(xspdb, commits):
     if commits < 0:
         commits = 0xFFFFFFFFFFFFFF
     delta = commits
-    while delta > 0:
+    while delta > 0 and not xspdb.api_dut_is_step_exit():
         delta = delta - xspdb.api_xistep(delta)
         check_is_need_trace(xspdb)
-    xspdb.message(f"Execute {commits} commits completed")
+    xspdb.message(f"Execute {commits - delta} commits completed")
 
 
 def create_xspdb():

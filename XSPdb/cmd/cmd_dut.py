@@ -169,6 +169,13 @@ class CmdDut:
             return True
         return False
 
+    def api_dut_is_step_exit(self):
+        """Check if the step is exit"""
+        return any([self.api_is_difftest_diff_exit(show_log=False),
+                    self.api_is_hit_good_trap(show_log=False),
+                    self.api_is_hit_good_loop(show_log=False),
+                    ])
+
     def api_step_dut(self, cycle, batch_cycle=200):
         """Step through the circuit
 

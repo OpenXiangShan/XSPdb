@@ -333,6 +333,7 @@ class XSPdb(pdb.Pdb):
             cmd = self.init_cmd
             self.init_cmd = None
             self.onecmd(cmd)
+            return
         return super().interaction(frame, traceback)
 
     def api_set_init_cmd(self, cmd):
