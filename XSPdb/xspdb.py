@@ -6,6 +6,7 @@ from collections import OrderedDict
 import os
 import inspect
 import pkgutil
+import signal
 
 from XSPdb.cmd.util import message, info, error, warn, build_prefix_tree, register_commands, YELLOW, RESET, set_log, set_log_file
 from XSPdb.cmd.util import load_module_from_file, load_package_from_dir, set_xspdb_log_level
@@ -65,6 +66,20 @@ class XSPdb(pdb.Pdb):
         self.load_cmds()
         self.api_init_waveform()
         self.init_cmd = None
+        self.sigint_original_handler = signal.getsignal(signal.SIGINT)
+        self.sigint_callback = []
+        signal.signal(signal.SIGINT, self._sigint_handler)
+
+    def _sigint_handler(self, s, f):
+        self.interrupt = True
+        warn("[Ctrl+C] Interrupted")
+        for f in self.sigint_callback:
+            f(self)
+
+    def __del__(self):
+        """Destructor"""
+        if self.sigint_original_handler:
+            signal.signal(signal.SIGINT, self.sigint_original_handler)
 
     def get_dut_tree(self):
         """Get the DUT tree"""

@@ -370,7 +370,7 @@ class CmdDiffTest:
         except Exception as e:
             error(f"convert {arg} to number fail: {str(e)}")
             return
-        return self.api_xistep(instr_count)
+        self.api_xistep(instr_count)
 
     def api_difftest_get_instance(self, instance=0):
         """Get the difftest instance

@@ -3,6 +3,7 @@
 import os
 import sys
 import argparse
+import signal
 
 # Search XSPdb and XSPython
 def import_or_search(*module_names):
@@ -90,7 +91,6 @@ def parse_mem_size(size_str):
 
 def run_script(xspdb, script_path):
     xspdb.api_set_init_cmd("xload_script %s 0.1"%script_path)
-    xspdb.set_trace()
     return False
 
 
@@ -102,8 +102,11 @@ def run_replay(xspdb, replay_path):
 def run_commits(xspdb, commits):
     if commits < 0:
         commits = 0xFFFFFFFFFFFFFF
-    cmts = xspdb.api_xistep(commits)
-    xspdb.message(f"commits: {cmts}")
+    delta = commits
+    while delta > 0:
+        delta = delta - xspdb.api_xistep(delta)
+        check_is_need_trace(xspdb)
+    xspdb.message(f"Execute {commits} commits completed")
 
 
 def create_xspdb():
@@ -138,25 +141,52 @@ def create_xspdb():
     return args, xspdb
 
 
+def check_is_need_trace(xspdb):
+    if getattr(xspdb, "__xspdb_need_fast_trace__", False) is True:
+        setattr(xspdb, "__xspdb_need_fast_trace__", False)
+        XSPdb.info("Force set trace")
+        xspdb.set_trace()
+    if xspdb.interrupt is True:
+        if getattr(xspdb, "__xspdb_set_traced__", None) is None:
+            setattr(xspdb, "__xspdb_set_traced__", True)
+            XSPdb.info("Find interrupt, set trace")
+            xspdb.set_trace()
+    return False
+
+
 def main(args, xspdb):
-    old_step = xspdb.dut.Step
-    def new_step(delta):
-        for i in range(delta):
-            try:
-                old_step(1)
-            except KeyboardInterrupt:
-                xspdb.interrupt = True
-                XSPdb.warn("[Ctrl+C] Entering interactive debug mode")
-                if getattr(xspdb,  "__xspdb_set_traced__", None) is None:
-                    xspdb.set_trace()
-                    setattr(xspdb, "__xspdb_set_traced__", True)
-                else:
-                    break
-    xspdb.dut.Step = new_step
+    def emu_step(delta):
+        c = xspdb.api_step_dut(delta)
+        check_is_need_trace(xspdb)
+        return c
     if not args.image:
         XSPdb.warn("No image to execute, Entering the interactive debug mode")
         xspdb.set_trace()
         return
+    if args.log_begin != args.log_end:
+        if args.dump_wave:
+            if args.log_begin == 0:
+                XSPdb.info(f"Waweform on at HW cycle = Zero")
+                xspdb.api_waveform_on()
+            else:
+                def cb_on_log_begin(s, checker, k, clk, sig, target):
+                    XSPdb.info(f"Waveform on at HW cycle = {target}")
+                    xspdb.api_waveform_on()
+                    s.interrupt = False
+                XSPdb.info(f"Set waveform on callback at HW cycle = {args.log_begin}")
+                xspdb.api_xbreak("SimTop_top.SimTop.timer", "eq", args.log_begin, callback=cb_on_log_begin, callback_once=True)
+            def cb_on_log_end(s, checker, k, clk, sig, target):
+                XSPdb.info(f"Waveform off at HW cycle = {target}")
+                xspdb.api_waveform_off()
+                s.interrupt = False
+            XSPdb.info(f"Set waveform off callback at HW cycle = {args.log_end}")
+            xspdb.api_xbreak("SimTop_top.SimTop.timer", "eq", args.log_end, callback=cb_on_log_end, callback_once=True)
+    if args.interact_at > 0:
+        def cb_on_interact(s, checker, k, clk, sig, target):
+            XSPdb.info(f"interact at HW cycle = {target}")
+            setattr(xspdb, "__xspdb_need_fast_trace__", True)
+        XSPdb.info(f"Set interact callback at HW cycle = {args.interact_at}")
+        xspdb.api_xbreak("SimTop_top.SimTop.timer", "eq", args.interact_at, callback=cb_on_interact, callback_once=True)
     if args.flash:
         xspdb.api_dut_flash_load(args.flash)
     if args.trace_pc_symbol_block_change:
@@ -175,33 +205,11 @@ def main(args, xspdb):
         xspdb.api_set_difftest_diff(True)
     if args.pc_commits != 0:
         return run_commits(xspdb, args.pc_commits)
-    # Normal execute
-    # 0 - wave_on - wave_off - max_cycles
-    #       _> interact_at
-    step_block = sorted([
-        ("wave_on", args.log_begin),
-        ("wave_off", args.log_end),
-        ("max_cycles", args.max_cycles),
-        ("interact_at", args.interact_at),
-    ], key=lambda x: x[1])
-    pre_cycle_index = 0
-    if args.interact_at == pre_cycle_index:
+    if args.interact_at == 0:
         xspdb.set_trace()
-    for k, v in step_block:
-        if v < pre_cycle_index:
-            continue
-        delta = v - pre_cycle_index
-        xspdb.dut.Step(delta)
-        XSPdb.info(f"Reach {k}: at {v} cycles")
-        pre_cycle_index = v
-        if k == "wave_on":
-            if args.dump_wave:
-                xspdb.api_waveform_on()
-        elif k == "wave_off":
-            if args.dump_wave:
-                xspdb.api_waveform_off()
-        elif k == "interact_at":
-            xspdb.set_trace()
+    delta = args.max_cycles
+    while delta > 0:
+        delta = delta - emu_step(delta)
     XSPdb.info("Finish all cycles (%d)" % args.max_cycles)
 
 

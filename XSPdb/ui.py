@@ -462,8 +462,7 @@ class XiangShanSimpleTUI:
         self.cmd_is_excuting = True
         original_sigint = signal.getsignal(signal.SIGINT)
         def _sigint_handler(s, f):
-            self.pdb.interrupt = True
-            self.console_output.set_text(self._get_output("Ctrl+C, try Exit.\n"))
+            self.pdb._sigint_handler(s, f)
         signal.signal(signal.SIGINT, _sigint_handler)
         self._redirect_stdout(True)
         self.pdb.onecmd(cmd)

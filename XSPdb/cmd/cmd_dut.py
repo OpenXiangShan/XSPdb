@@ -12,13 +12,16 @@ class CmdDut:
         self.xdut_signal_breaks = {}
         self.api_dut_reset()
 
-    def api_xbreak(self, signal_name, condition, value):
+    def api_xbreak(self, signal_name, condition, value, callback=None, callback_once=False):
         """Set a breakpoint on a signal
 
         Args:
             signal_name (string): Name of the signal
             condition (string): Condition for the breakpoint: eq, ne, gt, lt, ge, le, ch
             value (int/string): Value for the breakpoint
+            callback (function): Callback function to be called when the breakpoint is hit, args:
+                cb(self, checker, k, clk, sig.value, target.value)
+            callback_once (bool): Whether to call the callback function only once and remove the breakpoint
         """
         checker = self.xdut_signal_breaks.get("checker")
         checker_key = "xdut_signal_break"
@@ -57,7 +60,8 @@ class CmdDut:
             error(f"condition '{condition}' not supported")
             return
         checker.SetCondition(xbreak_key, sig, val, cmp)
-        self.xdut_signal_breaks[xbreak_key] = {"sig": sig, "val": val, "cmp": condition.lower()}
+        self.xdut_signal_breaks[xbreak_key] = {"sig": sig, "val": val, "cmp": condition.lower(), "cb": callback, "cb_once": callback_once}
+        return xbreak_key
 
     def api_xunbreak(self, xbreak_key):
         """Remove a breakpoint on a signal
@@ -127,6 +131,37 @@ class CmdDut:
         ret.sort(key=lambda x: x[0])
         return ret
 
+    def call_break_callbacks(self):
+        checker = self.xdut_signal_breaks.get("checker")
+        cb_count = 0
+        if not checker:
+            return cb_count
+        callbacks = {}
+        for k, v in self.xdut_signal_breaks.items():
+            if not k.startswith("xbreak-"):
+                continue
+            if not callable(v["cb"]):
+                continue
+            callbacks[k] = (v["cb"], v["cb_once"])
+        if not callbacks:
+            return cb_count
+        checked = {k: v for (k, v) in checker.ListCondition().items() if v}
+        for k, (cb, once) in callbacks.items():
+            if k not in checked:
+                continue
+            cb(self, checker, k, self.dut.xclock.clk, self.xdut_signal_breaks[k]["sig"].value, self.xdut_signal_breaks[k]["val"].value)
+            if once:
+                checker.RemoveCondition(k)
+                info(f"remove signal {k} break, because callback_once is True")
+                del self.xdut_signal_breaks[k]
+            cb_count += 1
+        if not {k: v for (k, v) in checker.ListCondition().items()}:
+            checker.ClearCondition()
+            self.dut.xclock.RemoveStepRisCbByDesc("xdut_signal_break")
+            assert "xdut_signal_break" not in self.dut.xclock.ListSteRisCbDesc()
+            self.xdut_signal_breaks.clear()
+        return cb_count
+
     def api_is_xbreak_on(self):
         """Check if the breakpoint is on"""
         checker = self.xdut_signal_breaks.get("checker")
@@ -174,6 +209,8 @@ class CmdDut:
         if not self.interrupt and not self.dut.xclock.IsDisable():
             self.dut.Step(offset)
             check_break()
+        if self.dut.xclock.IsDisable():
+            self.call_break_callbacks()
         return self.dut.xclock.clk - c_count
 
     def api_dut_reset(self):
