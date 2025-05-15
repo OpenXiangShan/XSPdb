@@ -6,7 +6,7 @@ import signal
 import traceback
 import time
 import select
-
+import readline
 import ctypes
 libc = ctypes.CDLL(None)
 
@@ -40,8 +40,7 @@ class XiangShanSimpleTUI:
         self.console_page_cache_index = 0
         self.console_page_scroll_enable = True
         self.content_asm_fix_width = content_asm_fix_width
-        self.cmd_history = []
-        self.cmd_history_index = 0
+        self.cmd_history_index = readline.get_current_history_length() + 1
         self.last_key = None
         self.last_line = None
         self.complete_remain = []
@@ -229,6 +228,12 @@ class XiangShanSimpleTUI:
             self.console_outbuffer = "\n".join(self.console_outbuffer.split("\n")[-self.console_max_height:])
         return self.console_outbuffer
 
+    def cmd_history_get(self, index):
+        current_history_length = readline.get_current_history_length()
+        if index < 1 or index > current_history_length:
+            return None
+        return readline.get_history_item(index)
+
     def handle_input(self, key):
         line = self.console_input.get_edit_text().lstrip()
         if key == 'enter':
@@ -238,9 +243,10 @@ class XiangShanSimpleTUI:
             self.console_input.set_edit_text('')
             self.process_command(cmd)
             if cmd:
-                if len(self.cmd_history) == 0 or cmd != self.cmd_history[-1]:
-                    self.cmd_history.append(cmd)
-                self.cmd_history_index = len(self.cmd_history)
+                pre_cmd_index = readline.get_current_history_length()
+                if not (pre_cmd_index > 0 and readline.get_history_item(pre_cmd_index) == cmd):
+                    readline.add_history(cmd)
+                self.cmd_history_index = readline.get_current_history_length() + 1
         elif key == 'esc':
             if self.console_output_page_scroll("exit_page"):
                 return
@@ -284,21 +290,21 @@ class XiangShanSimpleTUI:
         elif key == "up":
             if self.console_output_page_scroll(1):
                 return
-            if len(self.cmd_history) > 0:
-                self.cmd_history_index -= 1
-                self.cmd_history_index = max(0, self.cmd_history_index)
-                self.console_input.set_edit_text(self.cmd_history[self.cmd_history_index])
-                self.console_input.set_edit_pos(len(self.cmd_history[self.cmd_history_index]))
+            self.cmd_history_index -= 1
+            self.cmd_history_index = max(0, self.cmd_history_index)
+            hist_cmd = self.cmd_history_get(self.cmd_history_index)
+            if hist_cmd is not None:
+                self.console_input.set_edit_text(hist_cmd)
+                self.console_input.set_edit_pos(len(hist_cmd))
         elif key == "down":
             if self.console_output_page_scroll(-1):
                 return
-            if len(self.cmd_history) > 0:
-                self.cmd_history_index += 1
-                if self.cmd_history_index >= len(self.cmd_history) - 1:
-                    self.cmd_history_index = len(self.cmd_history) - 1
-                self.console_input.set_edit_text(self.cmd_history[self.cmd_history_index])
-                self.console_input.set_edit_pos(len(self.cmd_history[self.cmd_history_index]))
-
+            self.cmd_history_index += 1
+            self.cmd_history_index = min(self.cmd_history_index, readline.get_current_history_length() + 1)
+            hist_cmd = self.cmd_history_get(self.cmd_history_index)
+            if hist_cmd is not None:
+                self.console_input.set_edit_text(hist_cmd)
+                self.console_input.set_edit_pos(len(hist_cmd))
         self.last_key = key
         self.last_line = line
 
