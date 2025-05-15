@@ -12,6 +12,7 @@ class CmdBatch:
         self.ignore_cmds_in_batch = [
             "xload_script",
             "xreplay_log",
+            "xui",
         ]
 
     def cmd_in_ignore_list(self, cmd):
