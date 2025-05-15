@@ -294,6 +294,23 @@ class CmdDiffTest:
                 if old_pc != new_pc:
                     self.istep_last_commit_pc.append(new_pc)
 
+    def comuse_checker_is_break(self, checker):
+        if not checker:
+            return False
+        if {k: v for (k, v) in checker.ListCondition().items() if v}:
+            return True
+        return False
+
+    def api_break_is_instruction_commit(self):
+        """check break  is instruction commit or not"""
+        checker = self.condition_instrunct_istep.get("checker")
+        return self.comuse_checker_is_break(checker)
+
+    def api_break_is_watch_commit_pc(self):
+        """check break  is watch commit pc or not"""
+        checker = self.condition_watch_commit_pc.get("checker")
+        return self.comuse_checker_is_break(checker)
+
     def api_get_istep_last_commit_pc(self):
         """Get the last commit PC after instruction step
 
@@ -310,6 +327,31 @@ class CmdDiffTest:
         Returns:
             step_taken (int)
         """
+        self.api_xistep_break_on()
+        update_pc_func = self.condition_instrunct_istep["pc_sync_list"]
+        update_pc_func()
+        step_taken = 0
+        for i in range(instr_count):
+            update_pc_func()
+            v = self.api_step_dut(10000)
+            if self.api_dut_is_step_exit():
+                break
+            if self.interrupt:
+                break
+            elif self.dut.xclock.IsDisable():
+                self.api_istep_update_commit_pc()
+                self.data_last_symbol_block = self.api_echo_pc_symbol_block_change(max(self.api_get_istep_last_commit_pc() + [-1]),
+                                                                                   self.data_last_symbol_block)
+            elif v == 10000:
+                warn("step %d cycles complete, but no instruction commit find" % v)
+                step_taken -= 1 # ignore record
+            step_taken += 1
+        # remove stepi_check
+        self.api_xistep_break_off()
+        return step_taken
+
+    def api_xistep_break_on(self):
+        """Set the instruction step break condition"""
         if not self.condition_instrunct_istep:
             checker = self.xsp.ComUseCondCheck(self.dut.xclock)
             self.condition_instrunct_istep["checker"] = checker
@@ -329,33 +371,32 @@ class CmdDiffTest:
             self.condition_instrunct_istep["pc_sync_list"] = _update_old_pc
         cb_key = "stepi_check"
         checker = self.condition_instrunct_istep["checker"]
+        if cb_key in self.dut.xclock.ListSteRisCbDesc():
+            return
         self.dut.xclock.StepRis(checker.GetCb(), checker.CSelf(), cb_key)
-        update_pc_func = self.condition_instrunct_istep["pc_sync_list"]
-        update_pc_func()
-        step_taken = 0
-        for i in range(instr_count):
-            update_pc_func()
-            v = self.api_step_dut(10000)
-            if self.api_is_hit_good_trap():
-                break
-            elif self.api_is_hit_good_loop():
-                break
-            elif self.api_is_difftest_diff_exit():
-                break
-            if self.interrupt:
-                break
-            elif self.dut.xclock.IsDisable():
-                self.api_istep_update_commit_pc()
-                self.data_last_symbol_block = self.api_echo_pc_symbol_block_change(max(self.api_get_istep_last_commit_pc() + [-1]),
-                                                                                   self.data_last_symbol_block)
-            elif v == 10000:
-                warn("step %d cycles complete, but no instruction commit find" % v)
-                step_taken -= 1 # ignore record
-            step_taken += 1
-        # remove stepi_check
-        self.dut.xclock.RemoveStepRisCbByDesc(cb_key)
+
+    def api_xistep_break_off(self):
+        """Remove the instruction step break condition"""
+        cb_key = "stepi_check"
+        if cb_key in self.dut.xclock.ListSteRisCbDesc():
+            self.dut.xclock.RemoveStepRisCbByDesc(cb_key)
         assert cb_key not in self.dut.xclock.ListSteRisCbDesc()
-        return step_taken
+
+    def do_xistep_break(self, arg):
+        """Set the instruction step break condition
+
+        Args:
+            on_or_off (str): "on" or "off"
+        """
+        if arg.strip() == "on":
+            self.api_xistep_break_on()
+        elif arg.strip() == "off":
+            self.api_xistep_break_off()
+        else:
+            error("usage: xistep_break <on|off>")
+
+    def complete_xistep_break(self, text, line, begidx, endidx):
+        return [x for x in ["on", "off"] if x.startswith(text)] if text else ["on", "off"]
 
     def do_xistep(self, arg):
         """Step through instructions, stop when find instruction commit

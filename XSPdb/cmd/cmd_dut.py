@@ -176,6 +176,19 @@ class CmdDut:
                     self.api_is_hit_good_loop(show_log=False),
                     ])
 
+    def api_get_breaked_names(self):
+        """Get the names of the breaked names"""
+        names = []
+        # api_xbreak_list
+        names += [v[0] for v in self.api_xbreak_list() if v[4]]
+        # instrunct_istep
+        if self.api_break_is_instruction_commit():
+            names.append("Inst commit")
+        # watch_commit_pc
+        if self.api_break_is_watch_commit_pc():
+            names.append("Target commit")
+        return ",".join(names)
+
     def api_step_dut(self, cycle, batch_cycle=200):
         """Step through the circuit
 
@@ -187,8 +200,10 @@ class CmdDut:
             warn("mem not inited, please load bin file first")
         def check_break():
             if self.dut.xclock.IsDisable():
-                info("Find break point, break (step %d cycles) at cycle: %d (%s)" % (self.dut.xclock.clk - c_count,
-                                                                                     self.dut.xclock.clk, hex(self.dut.xclock.clk)))
+                info("Find break point (%s), break (step %d cycles) at cycle: %d (%s)" % (
+                    self.api_get_breaked_names(),
+                    self.dut.xclock.clk - c_count,
+                    self.dut.xclock.clk, hex(self.dut.xclock.clk)))
                 return True
             fc = getattr(self, "on_update_tstep", None)
             if fc:
