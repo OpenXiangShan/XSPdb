@@ -222,13 +222,15 @@ class CmdDut:
         self.interrupt = False # interrupt from outside by user
         batch, offset = cycle//batch_cycle, cycle % batch_cycle
         c_count = self.dut.xclock.clk
+        need_break = False
         for i in range(batch):
             if self.interrupt:
                 break
             self.dut.Step(batch_cycle)
             if check_break():
+                need_break = True
                 break
-        if not self.interrupt and not self.dut.xclock.IsDisable():
+        if not self.interrupt and not need_break:
             self.dut.Step(offset)
             check_break()
         if self.dut.xclock.IsDisable():
