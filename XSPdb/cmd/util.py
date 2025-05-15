@@ -11,44 +11,44 @@ GREEN = "\033[32m"
 RED = "\033[31m"
 YELLOW = "\033[33m"
 
-log = False
-logger = None
+_xspdb_enable_log = False
+_xspdb_logger = None
 
-def set_log(set_logging:bool):
-    global log
-    global logger
-    
-    log = set_logging
-    if log and logger is None:
+def xspdb_set_log(xspdb_enable_log:bool):
+    global _xspdb_enable_log
+    global _xspdb_logger
+
+    _xspdb_enable_log = xspdb_enable_log
+    if _xspdb_enable_log and _xspdb_logger is None:
         #initialize logger
-        logger = logging.getLogger("XSPdb")
-        logger.setLevel(logging.DEBUG)
+        _xspdb_logger = logging.getLogger("XSPdb")
+        _xspdb_logger.setLevel(logging.DEBUG)
         ch = logging.FileHandler("XSPdb.log")
         ch.setLevel(logging.DEBUG)
         formatter = logging.Formatter('%(message)s')
         ch.setFormatter(formatter)
-        logger.addHandler(ch)
+        _xspdb_logger.addHandler(ch)
 
-def set_log_file(log_file:str):
-    global logger
-    if logger is None:
-        logger = logging.getLogger("XSPdb")
-        logger.setLevel(logging.DEBUG)
+def xspdb_set_log_file(log_file:str):
+    global _xspdb_logger
+    if _xspdb_logger is None:
+        _xspdb_logger = logging.getLogger("XSPdb")
+        _xspdb_logger.setLevel(logging.DEBUG)
         ch = logging.FileHandler(log_file)
         ch.setLevel(logging.DEBUG)
         formatter = logging.Formatter('%(message)s')
         ch.setFormatter(formatter)
-        logger.addHandler(ch)
+        _xspdb_logger.addHandler(ch)
     else:
-        for handler in logger.handlers:
+        for handler in _xspdb_logger.handlers:
             if isinstance(handler, logging.FileHandler):
                 handler.close()
-                logger.removeHandler(handler)
+                _xspdb_logger.removeHandler(handler)
         ch = logging.FileHandler(log_file)
         ch.setLevel(logging.DEBUG)
         formatter = logging.Formatter('%(message)s')
         ch.setFormatter(formatter)
-        logger.addHandler(ch)
+        _xspdb_logger.addHandler(ch)
 
 _XSPDB_LOG_LEVEL = logging.DEBUG
 
@@ -60,46 +60,53 @@ def set_xspdb_log_level(level):
         level (int): Log level to set. Use logging.DEBUG, logging.INFO, etc.
     """
     global _XSPDB_LOG_LEVEL
-    global logger
+    global _xspdb_logger
     _XSPDB_LOG_LEVEL = level
-    if logger is not None:
-        logger.setLevel(level)
-        for handler in logger.handlers:
+    if _xspdb_logger is not None:
+        _xspdb_logger.setLevel(level)
+        for handler in _xspdb_logger.handlers:
             handler.setLevel(level)
+
+def log_message(*a, **k):
+    """Print a message to log"""
+    if _xspdb_enable_log:
+        old_level = _xspdb_logger.level
+        _xspdb_logger.setLevel(logging.INFO)
+        _xspdb_logger.info(*a, **k)
+        _xspdb_logger.setLevel(old_level)
 
 def message(*a, **k):
     """Print a message"""
     print(*a, **k)
-    if log:
-        logger.debug(*a, **k)
+    log_message(*a, **k)
 
 def info(msg):
     """Print information"""
     if _XSPDB_LOG_LEVEL <= logging.INFO:
         print(f"{GREEN}[Info] %s{RESET}" % msg)
-    if log:
-        logger.info("[Info] %s" % msg)
+    if _xspdb_enable_log:
+        _xspdb_logger.info("[Info] %s" % msg)
 
 def debug(msg):
     """Print debug information"""
     if _XSPDB_LOG_LEVEL <= logging.DEBUG:
         print("[Debug] %s" % msg)
-    if log:
-        logger.debug("[Debug] %s" % msg)
+    if _xspdb_enable_log:
+        _xspdb_logger.debug("[Debug] %s" % msg)
 
 def error(msg):
     """Print error information"""
     if _XSPDB_LOG_LEVEL <= logging.ERROR:
         print(f"{RED}[Error] %s{RESET}" % msg)
-    if log:
-        logger.error("[Error] %s" % msg)
+    if _xspdb_enable_log:
+        _xspdb_logger.error("[Error] %s" % msg)
 
 def warn(msg):
     """Print warning information"""
     if _XSPDB_LOG_LEVEL <= logging.WARNING:
         print(f"{YELLOW}[Warn] %s{RESET}" % msg)
-    if log:
-        logger.warning("[Warn] %s" % msg)
+    if _xspdb_enable_log:
+        _xspdb_logger.warning("[Warn] %s" % msg)
 
 def build_prefix_tree(signals):
     tree = {}

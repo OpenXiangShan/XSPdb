@@ -245,30 +245,6 @@ class CmdFiles:
     def complete_xflash(self, text, line, begidx, endidx):
         return self.api_complite_localfile(text)
 
-    def do_xload_script(self, arg):
-        """Load an XSPdb script
-
-        Args:
-            script (string): Path to the script file
-            delay_time (float): time delay between each cmd
-        """
-        usage = "usage: xload_script <script_file> [delay_time]"
-        if not arg:
-            message(usage)
-            return
-        args = arg.split()
-        path = args[0]
-        delay = 0.2
-        if len(args) > 1:
-            try:
-                delay = float(args[1])
-            except Exception as e:
-                error("convert dalay fail: %s, from args: %s\n%s" % (e, arg, usage))
-        self.api_exec_script(path, gap_time=delay)
-
-    def complete_xload_script(self, text, line, begidx, endidx):
-        return self.api_complite_localfile(text)
-
     def do_xload(self, arg):
         """Load a binary file into memory
 

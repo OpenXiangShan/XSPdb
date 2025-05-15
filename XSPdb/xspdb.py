@@ -8,7 +8,7 @@ import inspect
 import pkgutil
 import signal
 
-from XSPdb.cmd.util import message, info, error, warn, build_prefix_tree, register_commands, YELLOW, RESET, set_log, set_log_file
+from XSPdb.cmd.util import message, info, error, warn, build_prefix_tree, register_commands, YELLOW, RESET, xspdb_set_log, xspdb_set_log_file, log_message
 from XSPdb.cmd.util import load_module_from_file, load_package_from_dir, set_xspdb_log_level
 from logging import DEBUG, INFO, WARNING, ERROR
 
@@ -68,6 +68,8 @@ class XSPdb(pdb.Pdb):
         self.init_cmd = None
         self.sigint_original_handler = signal.getsignal(signal.SIGINT)
         self.sigint_callback = []
+        self.log_cmd_prefix = "@cmd{"
+        self.log_cmd_suffix = "}"
         signal.signal(signal.SIGINT, self._sigint_handler)
 
     def _sigint_handler(self, s, f):
@@ -297,24 +299,28 @@ class XSPdb(pdb.Pdb):
             message(("%-"+str(max_api_len+2)+"s: %s (from %s)") % (c[1], c[2], self.register_map.get(c[0], self.__class__.__name__)))
         info(f"Total {api_count} APIs")
 
-    def do_xset_log(self, arg):
+    def do_xlogfile_enable(self, arg):
         """Set log on or off
 
         Args:
             arg (string): Log level
         """
         if not arg:
-            message("usage: xset_log <on or off>")
+            message("usage: xlogfile_enable <on or off>")
             return
         if arg == "on":
             info("Set log on")
-            set_log(True)
+            xspdb_set_log(True)
         elif arg == "off":
-            set_log(False)
+            xspdb_set_log(False)
             info("Set log off")
         else:
-            message("usage: xset_log <on or off>")
-    
+            message("usage: xlogfile_enable <on or off>")
+
+    def complete_xlogfile_enable(self, text, line, begidx, endidx):
+        """Complete the log level"""
+        return [k for k in ["on", "off"] if k.startswith(text)]
+
     def do_xset_log_file(self, arg):
         """Set log file
 
@@ -324,8 +330,17 @@ class XSPdb(pdb.Pdb):
         if not arg:
             message("usage: xset_log_file <log file>")
             return
-        set_log_file(arg)
-        info("Set log file to %s" % arg)
+        xspdb_set_log(True)
+        xspdb_set_log_file(arg)
+        info("Enable log and set log file to: %s" % arg)
+
+    def complete_xset_log_file(self, text, line, begidx, endidx):
+        return self.api_complite_localfile(text)
+
+    def onecmd(self, line):
+        """Override the onecmd to avoid None cmd error"""
+        log_message(self.log_cmd_prefix + line + self.log_cmd_suffix)
+        return super().onecmd(line)
 
     def interaction(self, frame, traceback):
         if self.init_cmd:
