@@ -197,7 +197,7 @@ def main(args, xspdb):
         xspdb.api_turn_on_pc_symbol_block_change(True)
     if args.cmds:
         for c in args.cmds.replace("\\n", "\n").split("\n"):
-            xspdb.api_append_init_cmd(c)
+            xspdb.api_append_init_cmd(c.strip())
     if args.script:
         if run_script(xspdb, args.script):
             return
@@ -210,6 +210,8 @@ def main(args, xspdb):
             XSPdb.error(f"load difftest ref so {args.diff} failed")
             return
         xspdb.api_set_difftest_diff(True)
+    if args.cmds:
+        xspdb.set_trace()
     if args.pc_commits != 0:
         return run_commits(xspdb, args.pc_commits)
     if args.interact_at == 0:
