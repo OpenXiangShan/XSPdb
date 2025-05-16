@@ -358,6 +358,7 @@ class XSPdb(pdb.Pdb):
             break_handler = self.api_batch_get_default_break_cb()
         if exec is None:
             exec = self.onecmd
+        self.batch_depth += 1
         while len(self.batch_cmds_to_exec) > 0:
             line, gap_time, callback = self.batch_cmds_to_exec.pop(0)
             info(self.log_cmd_prefix + line + self.log_cmd_suffix)
@@ -367,10 +368,12 @@ class XSPdb(pdb.Pdb):
                 callback(self, line)
             if self.interrupt:
                 if callable(break_handler):
+                    self.batch_depth -= 1
                     return break_handler(exec_count)
             if gap_time > 0:
                 time.sleep(gap_time)
             exec_count += 1
+        self.batch_depth -= 1
         return exec_count
 
     def interaction(self, frame, traceback):

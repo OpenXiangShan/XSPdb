@@ -414,7 +414,7 @@ class XiangShanSimpleTUI:
     def is_working_in_batch_mode(self):
         if self.batch_mode_active:
             return True
-        return getattr(self.pdb, "__in_batch_exec__", False)
+        return self.pdb.is_working_in_batch_mode()
 
     def process_command(self, cmd):
         if cmd.startswith("xload_script"):

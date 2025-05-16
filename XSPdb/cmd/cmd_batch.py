@@ -14,12 +14,16 @@ class CmdBatch:
             "xreplay_log",
         ]
         self.batch_cmds_to_exec = []
+        self.batch_depth = 0
 
     def api_batch_append_tail_cmds(self, cmds):
         self.batch_cmds_to_exec += cmds
 
     def api_batch_append_head_cmds(self, cmds):
         self.batch_cmds_to_exec = cmds + self.batch_cmds_to_exec
+
+    def is_working_in_batch_mode(self):
+        return self.batch_depth > 0
 
     def cmd_in_ignore_list(self, cmd):
         """Check if the command is in the ignore list"""
