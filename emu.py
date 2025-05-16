@@ -71,6 +71,7 @@ def args_parser():
     parser.add_argument("--ram-size", type=str, default="", help="simulation memory size, for example 8GB / 128MB")
     parser.add_argument("--diff", type=str, default="", help="set the path of REF for differential testing")
     parser.add_argument("--cmds", type=str, default="", help="xspdb cmds to exceute")
+    parser.add_argument("--cmds-post", type=str, default="", help="xspdb cmds to exceute after script/replay")
     parser.add_argument("--mem-base-address", type=address, default=0x80000000, help="set the base address of memory")
     parser.add_argument("--flash-base-address", type=address, default=0x10000000, help="set the base address of flash")
     parser.add_argument("--diff-first-inst_address", type=address, default=-1, help="set the first instruction address for difftest testing")
@@ -198,6 +199,9 @@ def main(args, xspdb):
     if args.cmds:
         for c in args.cmds.replace("\\n", "\n").split("\n"):
             xspdb.api_append_init_cmd(c.strip())
+    if args.cmds_post:
+        for c in args.cmds_post.replace("\\n", "\n").split("\n"):
+            xspdb.api_batch_append_tail_one_cmd(c.strip())
     if args.script:
         if run_script(xspdb, args.script):
             return
@@ -210,7 +214,7 @@ def main(args, xspdb):
             XSPdb.error(f"load difftest ref so {args.diff} failed")
             return
         xspdb.api_set_difftest_diff(True)
-    if args.cmds:
+    if args.cmds or args.cmds_post:
         if not args.script and not args.replay:
             # Not run script or replay, so set trace
             xspdb.set_trace()

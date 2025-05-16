@@ -341,7 +341,7 @@ class XSPdb(pdb.Pdb):
         """Nop cmd do nothing"""
         pass
 
-    def do_xpuase(self, arg):
+    def do_xpause(self, arg):
         """Pause the interactive shell
 
         Args:

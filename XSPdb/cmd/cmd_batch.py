@@ -16,6 +16,12 @@ class CmdBatch:
         self.batch_cmds_to_exec = []
         self.batch_depth = 0
 
+    def api_batch_append_tail_one_cmd(self, cmd, gap_time=0.1, callback=None):
+        self.batch_cmds_to_exec.append((cmd, gap_time, callback))
+
+    def api_batch_append_head_one_cmd(self, cmd, gap_time=0.1, callback=None):
+        self.batch_cmds_to_exec = [(cmd, gap_time, callback)] + self.batch_cmds_to_exec
+
     def api_batch_append_tail_cmds(self, cmds):
         self.batch_cmds_to_exec += cmds
 
