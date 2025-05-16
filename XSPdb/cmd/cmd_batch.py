@@ -12,8 +12,8 @@ class CmdBatch:
         self.ignore_cmds_in_batch = [
             "xload_script",
             "xreplay_log",
-            "xui",
         ]
+        self.batch_cmds_to_exec = []
 
     def cmd_in_ignore_list(self, cmd):
         """Check if the command is in the ignore list"""
@@ -46,18 +46,20 @@ class CmdBatch:
         info(f"delete cmd: {cmd} from ignore list")
         return True
 
-    def api_exec_batch_cmd(self, cmd_list, callback=None, gap_time=0, target_prefix="", target_subfix="", cmd_handler=None):
-        cmd_exced = 0
+    def api_exec_batch_cmd(self, cmd_list, callback=None, gap_time=0, target_prefix="", target_subfix=""):
+        cmd_to_exce = []
         for i, line in enumerate(cmd_list):
             line = str(line).strip()
             if target_prefix:
-                if not line.startswith(target_prefix):
+                start = line.find(target_prefix)
+                if start < 0:
                     continue
-                line = line[len(target_prefix):].strip()
+                line = line[start + len(target_prefix):].strip()
             if target_subfix:
-                if not line.endswith(target_subfix):
+                end = line.find(target_subfix)
+                if end < 0:
                     continue
-                line = line[:-len(target_subfix)].strip()
+                line = line[:end].strip()
             if line.startswith("#"):
                 continue
             tag = "__sharp_tag_%s__" % str(time.time())
@@ -65,21 +67,13 @@ class CmdBatch:
             if not line:
                 continue
             if self.cmd_in_ignore_list(line):
-                warn(f"ignore cmd: {line}")
+                warn(f"ignore batch cmd: {line}")
                 continue
-            info(f"batch execmd[{i}]: {line}")
-            if callable(cmd_handler):
-                cmd_handler(line)
-            else:
-                self.onecmd(line)
-            if callable(callback):
-                callback(line)
-            if gap_time > 0:
-                time.sleep(gap_time)
-            cmd_exced += 1
-        return cmd_exced
+            cmd_to_exce.append((line, gap_time, callback))
+        self.batch_cmds_to_exec = cmd_to_exce + self.batch_cmds_to_exec
+        return len(cmd_to_exce)
 
-    def api_exec_script(self, script_file, callback=None, gap_time=0, target_prefix="", target_subfix="", cmd_handler=None):
+    def api_exec_script(self, script_file, callback=None, gap_time=0, target_prefix="", target_subfix=""):
         if not os.path.exists(script_file):
             error(f"script: {script_file} not find!")
             return -1
@@ -89,8 +83,13 @@ class CmdBatch:
                                            gap_time,
                                            target_prefix,
                                            target_subfix,
-                                           cmd_handler
                                            )
+
+    def api_batch_get_default_break_cb(self):
+        def break_cb(c):
+            warn(f"Batch cmd excution is breaked, after {c} cmds")
+            return False
+        return break_cb
 
     def do_xload_script(self, arg):
         """Load an XSPdb script
@@ -111,7 +110,9 @@ class CmdBatch:
                 delay = float(args[1])
             except Exception as e:
                 error("convert dalay fail: %s, from args: %s\n%s" % (e, arg, usage))
-        self.api_exec_script(path, gap_time=delay)
+        cmd_count = self.api_exec_script(path, gap_time=delay)
+        if cmd_count >= 0:
+            message(f"load script: {path} success, cmd count: {cmd_count}")
 
     def complete_xload_script(self, text, line, begidx, endidx):
         return self.api_complite_localfile(text)
@@ -135,10 +136,12 @@ class CmdBatch:
                 delay = float(args[1])
             except Exception as e:
                 error("convert dalay fail: %s, from args: %s\n%s" % (e, arg, usage))
-        self.api_exec_script(path, gap_time=delay,
+        cmd_count = self.api_exec_script(path, gap_time=delay,
                              target_prefix=self.log_cmd_prefix,
                              target_subfix=self.log_cmd_suffix,
                              )
+        if cmd_count >= 0:
+            message(f"replay log: {path} success, cmd count: {cmd_count}")
 
     def complete_xreplay_log(self, text, line, begidx, endidx):
         return self.api_complite_localfile(text)
@@ -197,3 +200,35 @@ class CmdBatch:
             message("ignore cmd list is empty")
             return
         message(f"{YELLOW}{' '.join(self.ignore_cmds_in_batch)}{RESET}")
+
+    def do_xbatch_continue(self, arg):
+        """Continue to execute batch commands
+
+        Args:
+            arg (None): No arguments
+        """
+        bcount = len(self.batch_cmds_to_exec)
+        if bcount <= 0:
+            error("No batch commands to execute")
+            return
+        info(f"Continue to execute batch {bcount} commands")
+        self._exec_batch_cmds(break_handler=self.api_batch_get_default_break_cb())
+
+    def do_xbatch_cmds(self, arg):
+        """Execute batch commands
+
+        Args:
+            show_detail: show detail [any_str]
+        """
+        detial = arg.strip()
+        if detial != "detail" and detial:
+            error("usage xbatch_cmds [detail]")
+            return
+        if detial:
+            for i, cmd in enumerate(self.batch_cmds_to_exec):
+                message(f"[{i}] => {cmd[0]}")
+        info(f"Total batched cmd is: {len(self.batch_cmds_to_exec)}")
+
+    def complete_xbatch_cmds(self, text, line, begidx, endidx):
+        """Complete the command for xbatch_cmds"""
+        return ["detail"]

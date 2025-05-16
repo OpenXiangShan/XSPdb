@@ -52,6 +52,7 @@ class XiangShanSimpleTUI:
         self.cmd_is_excuting = False
         self.exit_error = None
         self.batch_mode_depth = 0
+        self.batch_mode_active = False
 
         self.file_list = urwid.ListBox(self.asm_content)
         self.summary_pile = urwid.ListBox(self.summary_info)
@@ -150,7 +151,7 @@ class XiangShanSimpleTUI:
         else:
             self.old_stderr = sys.stderr
             sys.stderr = self._pdio
-    
+
     def _redirect_stderr_off(self):
         if self.cpp_stderr_buffer is not None:
             os.dup2(self.original_cpp_stderr, 2)
@@ -400,19 +401,23 @@ class XiangShanSimpleTUI:
     def batch_mode_enter(self):
         if self.batch_mode_depth == 0:
             self.console_page_scroll_enable = False
+            self.batch_mode_active = True
         self.batch_mode_depth += 1
 
     def batch_mode_exit(self):
         self.batch_mode_depth -= 1
         if self.batch_mode_depth == 0:
             self.console_page_scroll_enable = True
+            self.batch_mode_active = False
         self.batch_mode_depth = max(0, self.batch_mode_depth)
 
+    def is_working_in_batch_mode(self):
+        if self.batch_mode_active:
+            return True
+        return getattr(self.pdb, "__in_batch_exec__", False)
+
     def process_command(self, cmd):
-        if cmd.strip() in ("exit", "quit", "q"):
-            self.exit()
-            return
-        elif cmd.startswith("xload_script"):
+        if cmd.startswith("xload_script"):
             args = cmd.strip().split()
             if len(args) < 2:
                 self.console_output.set_text(self._get_output("Usage: xload_script <script_file> [gap_time]\n"))
@@ -424,8 +429,10 @@ class XiangShanSimpleTUI:
             if not os.path.exists(script_file):
                 self.console_output.set_text(self._get_output(f"Error: Script file {script_file} not found.\n"))
                 return
+            self.console_output.set_text(self._get_output(cmd + "\n"))
             self.batch_mode_enter()
-            self.pdb.api_exec_script(script_file, gap_time=gap_time, cmd_handler=self._exec_cmd)
+            self.pdb.api_exec_script(script_file, gap_time=gap_time)
+            self._exec_batch_cmds()
             self.batch_mode_exit()
 
         elif cmd.startswith("xload_log"):
@@ -440,26 +447,31 @@ class XiangShanSimpleTUI:
             if not os.path.exists(log_file):
                 self.console_output.set_text(self._get_output(f"Error: Log file {log_file} not found.\n"))
                 return
+            self.console_output.set_text(self._get_output(cmd + "\n"))
             self.batch_mode_enter()
-            with open(log_file, "r") as f:
-                for line in f.readlines():
-                    line = line[line.find(']')+1:].strip()
-                    if not line.startswith("------onecmd:"):
-                        continue
-                    line = line.split("------onecmd:")[1].strip()
-                    if line:
-                        self.process_command(line)
-                    time.sleep(gap_time)
+            self.pdb.api_exec_script(log_file, gap_time=gap_time,
+                                     target_prefix=self.pdb.log_cmd_prefix,
+                                     target_subfix=self.pdb.log_cmd_suffix,
+                                     )
+            self._exec_batch_cmds()
             self.batch_mode_exit()
 
         elif cmd == "clear":
             self.console_output.set_text(self._get_output(self.console_default_txt, clear=True))
-        elif cmd in ["continue", "c", "count"]:
-            self.console_output.set_text(self._get_output("continue/c/count is not supported in TUI\n"))
         else:
             self._exec_cmd(cmd)
 
     def _exec_cmd(self, cmd):
+        if cmd == "xcontinue_batch":
+            self._exec_batch_cmds()
+            return
+        if cmd in ["continue", "c", "count"]:
+            self.pdb.tui_ret = self.pdb.onecmd(cmd)
+            self.exit()
+            return self.pdb.tui_ret
+        if cmd in ["exit", "quit", "q"]:
+            self.exit()
+            return self.pdb.tui_ret
         self.console_output.set_text(self._get_output(cmd + "\n"))
         cap = self.console_input.caption
         self.console_input_busy_index = 0
@@ -471,7 +483,7 @@ class XiangShanSimpleTUI:
             self.pdb._sigint_handler(s, f)
         signal.signal(signal.SIGINT, _sigint_handler)
         self._redirect_stdout(True)
-        self.pdb.onecmd(cmd)
+        ret = self.pdb.onecmd(cmd, log_cmd=not self.is_working_in_batch_mode())
         flush_cpp_stdout()
         self._redirect_stdout(False)
         signal.signal(signal.SIGINT, original_sigint)
@@ -480,6 +492,7 @@ class XiangShanSimpleTUI:
         self.console_input.set_caption(cap)
         self.update_asm_abs_info()
         self.update_console_ouput(False)
+        return ret
 
     def update_asm_abs_info(self):
         self.asm_content.clear()
@@ -518,6 +531,23 @@ class XiangShanSimpleTUI:
             self.exit_error = e
         if clear_success:
             raise urwid.ExitMainLoop()
+
+    def _exec_batch_cmds(self):
+        def break_handler(c):
+            self.console_output.set_text(self._get_output(f"{YELLOW}Batch cmd excution is breaked, after {c} cmds{YELLOW}"))
+            self.loop.draw_screen()
+            return False
+        cmd_count = self.pdb._exec_batch_cmds(lambda x, _: self._exec_cmd(x),
+                                              break_handler=break_handler)
+        if cmd_count is False:
+            return
+        self.console_output.set_text(self._get_output(f"<Batch mode: {cmd_count} cmds Executed>"))
+        self.loop.draw_screen()
+
+    def check_exec_batch_cmds(self, loop, user_data=None):
+        if not self.is_working_in_batch_mode():
+            return
+        self._exec_batch_cmds()
 
 # Color configuration (using ANSI color names)
 palette = [
@@ -563,6 +593,7 @@ def enter_simple_tui(pdb):
     def _sigint_handler(s, f):
         loop.set_alarm_in(0.0, app.exit)
     signal.signal(signal.SIGINT, _sigint_handler)
+    loop.set_alarm_in(0.1, app.check_exec_batch_cmds)
     loop.run()
     signal.signal(signal.SIGINT, original_sigint)
 

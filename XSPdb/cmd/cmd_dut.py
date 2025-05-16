@@ -189,6 +189,12 @@ class CmdDut:
             names.append("Target commit")
         return ",".join(names)
 
+    def api_dut_step_ready(self):
+        """Prepare the DUT for stepping"""
+        self.dut.xclock.Enable()
+        assert not self.dut.xclock.IsDisable(), "clock is disable"
+        self.interrupt = False # interrupt from outside by user
+
     def api_step_dut(self, cycle, batch_cycle=200):
         """Step through the circuit
 
@@ -217,9 +223,7 @@ class CmdDut:
             elif self.api_is_hit_trap_break(show_log=True):
                 return True
             return False
-        self.dut.xclock.Enable()
-        assert not self.dut.xclock.IsDisable(), "clock is disable"
-        self.interrupt = False # interrupt from outside by user
+        self.api_dut_step_ready()
         batch, offset = cycle//batch_cycle, cycle % batch_cycle
         c_count = self.dut.xclock.clk
         need_break = False

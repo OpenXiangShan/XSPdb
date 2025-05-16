@@ -7,6 +7,7 @@ import os
 import inspect
 import pkgutil
 import signal
+import time
 
 from XSPdb.cmd.util import message, info, error, warn, build_prefix_tree, register_commands, YELLOW, RESET, xspdb_set_log, xspdb_set_log_file, log_message
 from XSPdb.cmd.util import load_module_from_file, load_package_from_dir, set_xspdb_log_level
@@ -240,12 +241,14 @@ class XSPdb(pdb.Pdb):
         if self.in_tui:
             error("Already in TUI")
             return
+        self.tui_ret = None
         self.in_tui = True
         enter_simple_tui(self)
         self.in_tui = False
         self.on_update_tstep = None
         self.interrupt = False
         info("XUI Exited.")
+        return self.tui_ret
 
     def do_xcmds(self, arg):
         """Print all xcmds
@@ -334,22 +337,60 @@ class XSPdb(pdb.Pdb):
         xspdb_set_log_file(arg)
         info("Enable log and set log file to: %s" % arg)
 
+    def do_xnop(self, arg):
+        """Nop cmd do nothing"""
+        pass
+
     def complete_xset_log_file(self, text, line, begidx, endidx):
         return self.api_complite_localfile(text)
 
-    def onecmd(self, line):
-        """Override the onecmd to avoid None cmd error"""
-        log_message(self.log_cmd_prefix + line + self.log_cmd_suffix)
+    def onecmd(self, line, log_cmd=True):
+        """Override the onecmd to log the command"""
+        if log_cmd:
+            log_message(self.log_cmd_prefix + line + self.log_cmd_suffix)
         return super().onecmd(line)
 
+    def _exec_batch_cmds(self, exec=None, break_handler=None):
+        exec_count = 0
+        if len(self.batch_cmds_to_exec) <= 0:
+            return exec_count
+        if break_handler is None:
+            break_handler = self.api_batch_get_default_break_cb()
+        if exec is None:
+            exec = self.onecmd
+        while len(self.batch_cmds_to_exec) > 0:
+            line, gap_time, callback = self.batch_cmds_to_exec.pop(0)
+            info(self.log_cmd_prefix + line + self.log_cmd_suffix)
+            self.api_dut_step_ready()
+            self.__last_batch_cmd_ret__ = exec(line, False)
+            if callback:
+                callback(self, line)
+            if self.interrupt:
+                if callable(break_handler):
+                    return break_handler(exec_count)
+            if gap_time > 0:
+                time.sleep(gap_time)
+            exec_count += 1
+        return exec_count
+
     def interaction(self, frame, traceback):
+        """Override the interaction to run init cmd"""
         if self.init_cmd:
             self.setup(frame, traceback)
             cmd = self.init_cmd
             self.init_cmd = None
-            self.onecmd(cmd)
-            return
+            info("Run init cmd: %s" % cmd)
+            self.onecmd(cmd, False)
+            if self._exec_batch_cmds() is not False:
+                return
         return super().interaction(frame, traceback)
+
+    def postcmd(self, stop, line):
+        """Override the postcmd to auto execute batch commands"""
+        if line.startswith("xload_script") or line.startswith("xreplay_log"):
+            if self._exec_batch_cmds() is not False:
+                return getattr(self, "__last_batch_cmd_ret__", False)
+        return super().postcmd(stop, line)
 
     def api_set_init_cmd(self, cmd):
         self.init_cmd = cmd
