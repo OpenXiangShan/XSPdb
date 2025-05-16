@@ -211,7 +211,9 @@ def main(args, xspdb):
             return
         xspdb.api_set_difftest_diff(True)
     if args.cmds:
-        xspdb.set_trace()
+        if not args.script and not args.replay:
+            # Not run script or replay, so set trace
+            xspdb.set_trace()
     if args.pc_commits != 0:
         return run_commits(xspdb, args.pc_commits)
     if args.interact_at == 0:
