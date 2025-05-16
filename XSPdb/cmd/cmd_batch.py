@@ -15,6 +15,12 @@ class CmdBatch:
         ]
         self.batch_cmds_to_exec = []
 
+    def api_batch_append_tail_cmds(self, cmds):
+        self.batch_cmds_to_exec += cmds
+
+    def api_batch_append_head_cmds(self, cmds):
+        self.batch_cmds_to_exec = cmds + self.batch_cmds_to_exec
+
     def cmd_in_ignore_list(self, cmd):
         """Check if the command is in the ignore list"""
         for ignore_cmd in self.ignore_cmds_in_batch:
@@ -109,10 +115,13 @@ class CmdBatch:
             try:
                 delay = float(args[1])
             except Exception as e:
-                error("convert dalay fail: %s, from args: %s\n%s" % (e, arg, usage))
+                error("Convert dalay fail: %s, from args: %s\n%s" % (e, arg, usage))
         cmd_count = self.api_exec_script(path, gap_time=delay)
         if cmd_count >= 0:
-            message(f"load script: {path} success, cmd count: {cmd_count}")
+            self._exec_batch_cmds()
+            is_continue = getattr(self, "__last_batch_cmd_ret__", False)
+            message(f"Load script: {path} success, cmd count: {cmd_count}, continue: {is_continue}")
+            return is_continue
 
     def complete_xload_script(self, text, line, begidx, endidx):
         return self.api_complite_localfile(text)
@@ -135,13 +144,16 @@ class CmdBatch:
             try:
                 delay = float(args[1])
             except Exception as e:
-                error("convert dalay fail: %s, from args: %s\n%s" % (e, arg, usage))
+                error("Convert dalay fail: %s, from args: %s\n%s" % (e, arg, usage))
         cmd_count = self.api_exec_script(path, gap_time=delay,
                              target_prefix=self.log_cmd_prefix,
                              target_subfix=self.log_cmd_suffix,
                              )
         if cmd_count >= 0:
-            message(f"replay log: {path} success, cmd count: {cmd_count}")
+            self._exec_batch_cmds()
+            is_continue = getattr(self, "__last_batch_cmd_ret__", False)
+            message(f"Replay log: {path} success, cmd count: {cmd_count}, continue: {is_continue}")
+            return is_continue
 
     def complete_xreplay_log(self, text, line, begidx, endidx):
         return self.api_complite_localfile(text)
@@ -212,7 +224,7 @@ class CmdBatch:
             error("No batch commands to execute")
             return
         info(f"Continue to execute batch {bcount} commands")
-        self._exec_batch_cmds(break_handler=self.api_batch_get_default_break_cb())
+        self._exec_batch_cmds()
 
     def do_xbatch_cmds(self, arg):
         """Execute batch commands

@@ -66,7 +66,7 @@ class XSPdb(pdb.Pdb):
         self.register_map = OrderedDict()
         self.load_cmds()
         self.api_init_waveform()
-        self.init_cmd = None
+        self.init_cmds = []
         self.sigint_original_handler = signal.getsignal(signal.SIGINT)
         self.sigint_callback = []
         self.log_cmd_prefix = "@cmd{"
@@ -375,22 +375,18 @@ class XSPdb(pdb.Pdb):
 
     def interaction(self, frame, traceback):
         """Override the interaction to run init cmd"""
-        if self.init_cmd:
+        if self.init_cmds:
             self.setup(frame, traceback)
-            cmd = self.init_cmd
-            self.init_cmd = None
-            info("Run init cmd: %s" % cmd)
-            self.onecmd(cmd, False)
+            cmds = []
+            while len(self.init_cmds) > 0:
+                cmd = self.init_cmds.pop(0)
+                info("Find init cmd: '%s', add to batch cmd queue" % cmd)
+                cmds.append((cmd, 0.1, None))
+            if cmds:
+                self.api_batch_append_head_cmds(cmds)
             if self._exec_batch_cmds() is not False:
                 return
         return super().interaction(frame, traceback)
 
-    def postcmd(self, stop, line):
-        """Override the postcmd to auto execute batch commands"""
-        if line.startswith("xload_script") or line.startswith("xreplay_log"):
-            if self._exec_batch_cmds() is not False:
-                return getattr(self, "__last_batch_cmd_ret__", False)
-        return super().postcmd(stop, line)
-
-    def api_set_init_cmd(self, cmd):
-        self.init_cmd = cmd
+    def api_append_init_cmd(self, cmd):
+        self.init_cmds.append(cmd)

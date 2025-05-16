@@ -70,6 +70,7 @@ def args_parser():
     parser.add_argument("--wave-path", type=str, default="", help="dump waveform to a specified PATH")
     parser.add_argument("--ram-size", type=str, default="", help="simulation memory size, for example 8GB / 128MB")
     parser.add_argument("--diff", type=str, default="", help="set the path of REF for differential testing")
+    parser.add_argument("--cmds", type=str, default="", help="xspdb cmds to exceute")
     parser.add_argument("--mem-base-address", type=address, default=0x80000000, help="set the base address of memory")
     parser.add_argument("--flash-base-address", type=address, default=0x10000000, help="set the base address of flash")
     parser.add_argument("--diff-first-inst_address", type=address, default=-1, help="set the first instruction address for difftest testing")
@@ -90,13 +91,19 @@ def parse_mem_size(size_str):
 
 
 def run_script(xspdb, script_path):
-    xspdb.api_set_init_cmd("xload_script %s 0.1"%script_path)
+    xspdb.api_exec_script(script_path, gap_time=0.1)
+    xspdb.api_append_init_cmd("xnop")
     xspdb.set_trace()
     return False
 
 
 def run_replay(xspdb, replay_path):
-    xspdb.warn("run_replay it to be done!")
+    xspdb.api_exec_script(replay_path, gap_time=0.1,
+                          target_prefix=xspdb.log_cmd_prefix,
+                          target_subfix=xspdb.log_cmd_suffix,
+                          )
+    xspdb.api_append_init_cmd("xnop")
+    xspdb.set_trace()
     return True
 
 
@@ -188,6 +195,9 @@ def main(args, xspdb):
         xspdb.api_dut_flash_load(args.flash)
     if args.trace_pc_symbol_block_change:
         xspdb.api_turn_on_pc_symbol_block_change(True)
+    if args.cmds:
+        for c in args.cmds.replace("\\n", "\n").split("\n"):
+            xspdb.api_append_init_cmd(c)
     if args.script:
         if run_script(xspdb, args.script):
             return
