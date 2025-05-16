@@ -416,7 +416,13 @@ class XiangShanSimpleTUI:
             return True
         return self.pdb.is_working_in_batch_mode()
 
+    def record_cmd(self, cmd):
+        self.pdb.record_cmd(cmd)
+
     def process_command(self, cmd):
+        if cmd == "clear":
+            self.console_output.set_text(self._get_output(self.console_default_txt, clear=True))
+            return
         if cmd.startswith("xload_script"):
             args = cmd.strip().split()
             if len(args) < 2:
@@ -430,11 +436,11 @@ class XiangShanSimpleTUI:
                 self.console_output.set_text(self._get_output(f"Error: Script file {script_file} not found.\n"))
                 return
             self.console_output.set_text(self._get_output(cmd + "\n"))
+            self.record_cmd(cmd)
             self.batch_mode_enter()
             self.pdb.api_exec_script(script_file, gap_time=gap_time)
             self._exec_batch_cmds()
             self.batch_mode_exit()
-
         elif cmd.startswith("xload_log"):
             args = cmd.strip().split()
             if len(args) < 2:
@@ -448,6 +454,7 @@ class XiangShanSimpleTUI:
                 self.console_output.set_text(self._get_output(f"Error: Log file {log_file} not found.\n"))
                 return
             self.console_output.set_text(self._get_output(cmd + "\n"))
+            self.record_cmd(cmd)
             self.batch_mode_enter()
             self.pdb.api_exec_script(log_file, gap_time=gap_time,
                                      target_prefix=self.pdb.log_cmd_prefix,
@@ -455,10 +462,8 @@ class XiangShanSimpleTUI:
                                      )
             self._exec_batch_cmds()
             self.batch_mode_exit()
-
-        elif cmd == "clear":
-            self.console_output.set_text(self._get_output(self.console_default_txt, clear=True))
         else:
+            self.record_cmd(cmd)
             self._exec_cmd(cmd)
 
     def _exec_cmd(self, cmd):
@@ -483,7 +488,7 @@ class XiangShanSimpleTUI:
             self.pdb._sigint_handler(s, f)
         signal.signal(signal.SIGINT, _sigint_handler)
         self._redirect_stdout(True)
-        ret = self.pdb.onecmd(cmd, log_cmd=not self.is_working_in_batch_mode())
+        ret = self.pdb.onecmd(cmd, log_cmd=False)
         flush_cpp_stdout()
         self._redirect_stdout(False)
         signal.signal(signal.SIGINT, original_sigint)

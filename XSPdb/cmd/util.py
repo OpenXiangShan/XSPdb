@@ -59,21 +59,24 @@ def set_xspdb_log_level(level):
     Args:
         level (int): Log level to set. Use logging.DEBUG, logging.INFO, etc.
     """
-    global _XSPDB_LOG_LEVEL
     global _xspdb_logger
-    _XSPDB_LOG_LEVEL = level
     if _xspdb_logger is not None:
         _xspdb_logger.setLevel(level)
         for handler in _xspdb_logger.handlers:
             handler.setLevel(level)
 
+def set_xspdb_debug_level(level):
+    global _XSPDB_LOG_LEVEL
+    _XSPDB_LOG_LEVEL = level
+    set_xspdb_log_level(level)
+
 def log_message(*a, **k):
     """Print a message to log"""
     if _xspdb_enable_log:
         old_level = _xspdb_logger.level
-        _xspdb_logger.setLevel(logging.INFO)
+        set_xspdb_log_level(logging.INFO)
         _xspdb_logger.info(*a, **k)
-        _xspdb_logger.setLevel(old_level)
+        set_xspdb_log_level(old_level)
 
 def message(*a, **k):
     """Print a message"""

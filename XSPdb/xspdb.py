@@ -302,6 +302,15 @@ class XSPdb(pdb.Pdb):
             message(("%-"+str(max_api_len+2)+"s: %s (from %s)") % (c[1], c[2], self.register_map.get(c[0], self.__class__.__name__)))
         info(f"Total {api_count} APIs")
 
+    @staticmethod
+    def api_log_enable_log(enable):
+        xspdb_set_log(enable)
+
+    @staticmethod
+    def api_log_set_log_file(log_file):
+        xspdb_set_log(True)
+        xspdb_set_log_file(log_file)
+
     def do_xlogfile_enable(self, arg):
         """Set log on or off
 
@@ -341,6 +350,13 @@ class XSPdb(pdb.Pdb):
         """Nop cmd do nothing"""
         pass
 
+    def api_busy_sleep(self, data, delta=0.1):
+        for i in range(int(data//delta)):
+            time.sleep(delta)
+            if self.interrupt:
+                return (i+1)*delta
+        return data
+
     def do_xpause(self, arg):
         """Pause the interactive shell
 
@@ -356,15 +372,18 @@ class XSPdb(pdb.Pdb):
                 error("Convert pause time fail: %s, from args: %s \nsage: xpause [time]" % (e, arg))
                 return
         info("Pause for %s seconds" % p_time)
-        time.sleep(p_time)
+        self.api_busy_sleep(p_time)
 
     def complete_xset_log_file(self, text, line, begidx, endidx):
         return self.api_complite_localfile(text)
 
+    def record_cmd(self, cmd):
+        log_message(self.log_cmd_prefix + cmd + self.log_cmd_suffix)
+
     def onecmd(self, line, log_cmd=True):
         """Override the onecmd to log the command"""
         if log_cmd:
-            log_message(self.log_cmd_prefix + line + self.log_cmd_suffix)
+            self.record_cmd(line)
         return super().onecmd(line)
 
     def _exec_batch_cmds(self, exec=None, break_handler=None):
@@ -378,17 +397,16 @@ class XSPdb(pdb.Pdb):
         self.batch_depth += 1
         while len(self.batch_cmds_to_exec) > 0:
             line, gap_time, callback = self.batch_cmds_to_exec.pop(0)
-            info(self.log_cmd_prefix + line + self.log_cmd_suffix)
+            info(f"Batch exec: '{line}'")
             self.api_dut_step_ready()
             self.__last_batch_cmd_ret__ = exec(line, False)
             if callback:
                 callback(self, line)
+            self.api_busy_sleep(gap_time)
             if self.interrupt:
                 if callable(break_handler):
                     self.batch_depth -= 1
                     return break_handler(exec_count)
-            if gap_time > 0:
-                time.sleep(gap_time)
             exec_count += 1
         self.batch_depth -= 1
         return exec_count

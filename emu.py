@@ -3,7 +3,13 @@
 import os
 import sys
 import argparse
-import signal
+import logging
+
+logging_level_map = {"debug": logging.DEBUG,
+                      "info": logging.INFO,
+                      "warn": logging.WARN,
+                      "erro": logging.ERROR,
+                     }
 
 # Search XSPdb and XSPython
 def import_or_search(*module_names):
@@ -59,10 +65,13 @@ def args_parser():
     parser.add_argument("-b", "--log-begin", type=int, default=0, help="display log from NUM th cycle")
     parser.add_argument("-e", "--log-end", type=int, default=0xFFFFFFFFFFFFFFFF, help="stop display log at NUM th cycle")
     parser.add_argument("-t", "--interact-at", type=int, default=-1, help="interact at NUM th cycle")
-    parser.add_argument("-l", "--log-level", type=int, default=0, help="set the log level")
+    parser.add_argument("-l", "--log", action="store_true", default=False, help="enable log")
+    parser.add_argument("--log-file", type=str, default="", help="log file")
+    parser.add_argument("-bi", "--batch-interval", type=float, default=0.1, help="batch cmd delay interval time")
     parser.add_argument("-s", "--script", type=str, default="", help="script file to run")
     parser.add_argument("-r", "--replay", type=str, default="", help="logs to replay")
     parser.add_argument("--debug-level", type=str, default="", choices=["debug", "info", "warn", "erro"], help="set debug level")
+    parser.add_argument("--log-level", type=str, default="", choices=["debug", "info", "warn", "erro"], help="set log level")
     parser.add_argument("--pc-commits", type=int, default=0, help="run until NUM th commit, -1 means no limit")
     parser.add_argument("--sim-args", type=lambda s: s.split(','), default=[], help="additional args for simulation")
     parser.add_argument("--dump-wave", action="store_true", default=False, help="dump waveform when log is enabled")
@@ -91,15 +100,15 @@ def parse_mem_size(size_str):
         raise ValueError(f"Invalid memory size format: {size_str}")
 
 
-def run_script(xspdb, script_path):
-    xspdb.api_exec_script(script_path, gap_time=0.1)
+def run_script(xspdb, script_path, it_time):
+    xspdb.api_exec_script(script_path, gap_time=it_time)
     xspdb.api_append_init_cmd("xnop")
     xspdb.set_trace()
     return False
 
 
-def run_replay(xspdb, replay_path):
-    xspdb.api_exec_script(replay_path, gap_time=0.1,
+def run_replay(xspdb, replay_path, it_time):
+    xspdb.api_exec_script(replay_path, gap_time=it_time,
                           target_prefix=xspdb.log_cmd_prefix,
                           target_subfix=xspdb.log_cmd_suffix,
                           )
@@ -120,6 +129,11 @@ def run_commits(xspdb, commits):
 
 def create_xspdb():
     args = args_parser()
+    if args.log:
+        XSPdb.XSPdb.api_log_enable_log(True)
+    if args.log_file:
+        XSPdb.XSPdb.api_log_set_log_file(args.log_file)
+    XSPdb.message(f"Exec: {' '.join(sys.argv)}")
     sim_kwargs = {}
     sim_args = args.sim_args
     if args.wave_path:
@@ -136,11 +150,9 @@ def create_xspdb():
     if args.ram_size:
         xpd_kwagrs["default_mem_size"] = parse_mem_size(args.ram_size)
     if args.debug_level:
-        import logging
-        XSPdb.set_xspdb_log_level({"debug":logging.DEBUG,
-                                   "info": logging.INFO,
-                                   "warn": logging.WARN,
-                                   "erro": logging.ERROR}[args.debug_level])
+        XSPdb.set_xspdb_debug_level(logging_level_map[args.debug_level])
+    if args.log_level:
+        XSPdb.set_xspdb_log_level(logging_level_map[args.log_level])
     # New XSPdb
     from XSPython import difftest as df, xsp
     xspdb = XSPdb.XSPdb(dut, df, xsp, **xpd_kwagrs)
@@ -203,10 +215,10 @@ def main(args, xspdb):
         for c in args.cmds_post.replace("\\n", "\n").split("\n"):
             xspdb.api_batch_append_tail_one_cmd(c.strip())
     if args.script:
-        if run_script(xspdb, args.script):
+        if run_script(xspdb, args.script, args.batch_interval):
             return
     if args.replay:
-        if run_replay(xspdb, args.replay):
+        if run_replay(xspdb, args.replay, args.batch_interval):
             return
     if args.diff:
         assert os.path.isfile(args.diff)
