@@ -341,6 +341,23 @@ class XSPdb(pdb.Pdb):
         """Nop cmd do nothing"""
         pass
 
+    def do_xpuase(self, arg):
+        """Pause the interactive shell
+
+        Args:
+            time (float): time to pause, default is 1 second
+        """
+        p_time = 1
+        a = arg.strip()
+        if a:
+            try:
+                p_time = float(a)
+            except Exception as e:
+                error("Convert pause time fail: %s, from args: %s \nsage: xpause [time]" % (e, arg))
+                return
+        info("Pause for %s seconds" % p_time)
+        time.sleep(p_time)
+
     def complete_xset_log_file(self, text, line, begidx, endidx):
         return self.api_complite_localfile(text)
 
