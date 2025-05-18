@@ -60,31 +60,30 @@ def args_parser():
     address = lambda s: int(s, 0)
     parser = argparse.ArgumentParser(description="XSPdb Emulation Tool")
     parser.add_argument("-v", "--version", action="version", version=f"XSPdb {XSPdb.__version__}")
-    parser.add_argument("-C", "--max-cycles", type=int, default=0xFFFFFFFFFFFFFFFF, help="execute at most NUM cycles")
-    parser.add_argument("-i", "--image", type=str, default="", help="run with this image file")
-    parser.add_argument("-b", "--log-begin", type=int, default=0, help="display log from NUM th cycle")
-    parser.add_argument("-e", "--log-end", type=int, default=0xFFFFFFFFFFFFFFFF, help="stop display log at NUM th cycle")
-    parser.add_argument("-t", "--interact-at", type=int, default=-1, help="interact at NUM th cycle")
-    parser.add_argument("-l", "--log", action="store_true", default=False, help="enable log")
-    parser.add_argument("--log-file", type=str, default="", help="log file")
-    parser.add_argument("-bi", "--batch-interval", type=float, default=0.1, help="batch cmd delay interval time")
-    parser.add_argument("-s", "--script", type=str, default="", help="script file to run")
-    parser.add_argument("-r", "--replay", type=str, default="", help="logs to replay")
+    parser.add_argument("-C", "--max-cycles", type=int, default=0xFFFFFFFFFFFFFFFF, help="maximum simulation cycles to execute")
+    parser.add_argument("-i", "--image", type=str, default="", help="image file to load and run")
+    parser.add_argument("-b", "--wave-begin", type=int, default=0, help="start waveform dump at the specified cycle")
+    parser.add_argument("-e", "--wave-end", type=int, default=0, help="stop waveform dump at the specified cycle")
+    parser.add_argument("-t", "--interact-at", type=int, default=-1, help="enter interactive mode at the specified cycle")
+    parser.add_argument("-l", "--log", action="store_true", default=False, help="enable logging output")
+    parser.add_argument("--log-file", type=str, default="", help="log file name (default: ./XSPdb.log)")
+    parser.add_argument("-bi", "--batch-interval", type=float, default=0.1, help="interval time (seconds) between batch commands")
+    parser.add_argument("-s", "--script", type=str, default="", help="script file to execute")
+    parser.add_argument("-r", "--replay", type=str, default="", help="replay log file")
     parser.add_argument("--debug-level", type=str, default="", choices=["debug", "info", "warn", "erro"], help="set debug level")
     parser.add_argument("--log-level", type=str, default="", choices=["debug", "info", "warn", "erro"], help="set log level")
-    parser.add_argument("--pc-commits", type=int, default=0, help="run until NUM th commit, -1 means no limit")
-    parser.add_argument("--sim-args", type=lambda s: s.split(','), default=[], help="additional args for simulation")
-    parser.add_argument("--dump-wave", action="store_true", default=False, help="dump waveform when log is enabled")
-    parser.add_argument("-F", "--flash", type=str, default="", help="the flash bin file for simulation")
-    parser.add_argument("--wave-path", type=str, default="", help="dump waveform to a specified PATH")
-    parser.add_argument("--ram-size", type=str, default="", help="simulation memory size, for example 8GB / 128MB")
-    parser.add_argument("--diff", type=str, default="", help="set the path of REF for differential testing")
-    parser.add_argument("--cmds", type=str, default="", help="xspdb cmds to exceute")
-    parser.add_argument("--cmds-post", type=str, default="", help="xspdb cmds to exceute after script/replay")
-    parser.add_argument("--mem-base-address", type=address, default=0x80000000, help="set the base address of memory")
-    parser.add_argument("--flash-base-address", type=address, default=0x10000000, help="set the base address of flash")
-    parser.add_argument("--diff-first-inst_address", type=address, default=-1, help="set the first instruction address for difftest testing")
-    parser.add_argument("--trace-pc-symbol-block-change", action="store_true", default=False, help="trace pc symbol block change on")
+    parser.add_argument("--pc-commits", type=int, default=0, help="run until the specified number of commits; -1 means no limit")
+    parser.add_argument("--sim-args", type=lambda s: s.split(','), default=[], help="additional simulator arguments (comma-separated)")
+    parser.add_argument("-F", "--flash", type=str, default="", help="flash binary file for simulation")
+    parser.add_argument("--wave-path", type=str, default="", help="output path for waveform file")
+    parser.add_argument("--ram-size", type=str, default="", help="simulation RAM size (e.g., 8GB or 128MB)")
+    parser.add_argument("--diff", type=str, default="", help="path to REF shared object for difftest testing")
+    parser.add_argument("--cmds", type=str, default="", help="XSPdb commands to execute before run (\\n for newline)")
+    parser.add_argument("--cmds-post", type=str, default="", help="XSPdb commands to execute after script/replay (\\n for newline)")
+    parser.add_argument("--mem-base-address", type=address, default=0x80000000, help="base address of memory")
+    parser.add_argument("--flash-base-address", type=address, default=0x10000000, help="base address of flash")
+    parser.add_argument("--diff-first-inst_address", type=address, default=-1, help="first instruction address for difftest")
+    parser.add_argument("--trace-pc-symbol-block-change", action="store_true", default=False, help="enable tracing of PC symbol block changes")
     return parser.parse_args()
 
 
@@ -156,9 +155,9 @@ def create_xspdb():
     # New XSPdb
     from XSPython import difftest as df, xsp
     xspdb = XSPdb.XSPdb(dut, df, xsp, **xpd_kwagrs)
-    assert args.log_begin <= args.log_end, "arg --log-begin must be less than log_end"
-    assert args.log_begin >= 0, "arg --log-begin must be greater than 0"
-    assert args.log_end <= args.max_cycles, "arg --log-end must be less than max_cycles"
+    assert args.wave_begin <= args.wave_end, "arg --log-begin must be less than log_end"
+    assert args.wave_begin >= 0, "arg --log-begin must be greater than 0"
+    assert args.wave_end <= args.max_cycles, "arg --log-end must be less than max_cycles"
     return args, xspdb
 
 
@@ -180,24 +179,23 @@ def main(args, xspdb):
         c = xspdb.api_step_dut(delta)
         check_is_need_trace(xspdb)
         return c
-    if args.log_begin != args.log_end:
-        if args.dump_wave:
-            if args.log_begin == 0:
-                XSPdb.info(f"Waweform on at HW cycle = Zero")
+    if args.wave_begin != args.wave_end:
+        if args.wave_begin == 0:
+            XSPdb.info(f"Waweform on at HW cycle = Zero")
+            xspdb.api_waveform_on()
+        else:
+            def cb_on_log_begin(s, checker, k, clk, sig, target):
+                XSPdb.info(f"Waveform on at HW cycle = {target}")
                 xspdb.api_waveform_on()
-            else:
-                def cb_on_log_begin(s, checker, k, clk, sig, target):
-                    XSPdb.info(f"Waveform on at HW cycle = {target}")
-                    xspdb.api_waveform_on()
-                    s.interrupt = False
-                XSPdb.info(f"Set waveform on callback at HW cycle = {args.log_begin}")
-                xspdb.api_xbreak("SimTop_top.SimTop.timer", "eq", args.log_begin, callback=cb_on_log_begin, callback_once=True)
-            def cb_on_log_end(s, checker, k, clk, sig, target):
-                XSPdb.info(f"Waveform off at HW cycle = {target}")
-                xspdb.api_waveform_off()
                 s.interrupt = False
-            XSPdb.info(f"Set waveform off callback at HW cycle = {args.log_end}")
-            xspdb.api_xbreak("SimTop_top.SimTop.timer", "eq", args.log_end, callback=cb_on_log_end, callback_once=True)
+            XSPdb.info(f"Set waveform on callback at HW cycle = {args.wave_begin}")
+            xspdb.api_xbreak("SimTop_top.SimTop.timer", "eq", args.wave_begin, callback=cb_on_log_begin, callback_once=True)
+        def cb_on_log_end(s, checker, k, clk, sig, target):
+            XSPdb.info(f"Waveform off at HW cycle = {target}")
+            xspdb.api_waveform_off()
+            s.interrupt = False
+        XSPdb.info(f"Set waveform off callback at HW cycle = {args.wave_end}")
+        xspdb.api_xbreak("SimTop_top.SimTop.timer", "eq", args.wave_end, callback=cb_on_log_end, callback_once=True)
     if args.interact_at > 0:
         def cb_on_interact(s, checker, k, clk, sig, target):
             XSPdb.info(f"interact at HW cycle = {target}")
