@@ -5,6 +5,7 @@ ready-to-run/*
 XSPython/*
 *.fst
 *.vcd
+*.hier
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
