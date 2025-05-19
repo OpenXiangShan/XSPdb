@@ -38,7 +38,7 @@ class CmdTrap:
             if not os.path.isabs(wave_file):
                 error(f"waveform file[{wave_file}] name must be a ligal path")
                 return False
-            self.dut.CloseWaveform(wave_file)
+            self.dut.SetWaveform(wave_file)
         self.dut.OpenWaveform()
         self.waveform_on = True
         return True

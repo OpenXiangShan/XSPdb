@@ -137,6 +137,7 @@ def create_xspdb():
     sim_kwargs = {}
     sim_args = args.sim_args
     if args.wave_path:
+        args.wave_path = os.path.abspath(args.wave_path)
         sim_kwargs["waveform_filename"] = args.wave_path
     dut = XSPython.DUTSimTop(*sim_args, **sim_kwargs)
     xpd_kwagrs = {
@@ -182,13 +183,14 @@ def main(args, xspdb):
         check_is_need_trace(xspdb)
         return c
     if args.wave_begin != args.wave_end:
+        wave_file_path = args.wave_path if args.wave_path else ""
         if args.wave_begin <= 0:
             XSPdb.info(f"Waweform on at HW cycle = Zero")
-            xspdb.api_waveform_on()
+            xspdb.api_waveform_on(wave_file_path)
         else:
             def cb_on_log_begin(s, checker, k, clk, sig, target):
                 XSPdb.info(f"Waveform on at HW cycle = {target}")
-                xspdb.api_waveform_on()
+                xspdb.api_waveform_on(wave_file_path)
                 s.interrupt = False
             XSPdb.info(f"Set waveform on callback at HW cycle = {args.wave_begin}")
             xspdb.api_xbreak("SimTop_top.SimTop.timer", "eq", args.wave_begin, callback=cb_on_log_begin, callback_once=True)
@@ -231,8 +233,15 @@ def main(args, xspdb):
         if not args.script and not args.replay:
             # Not run script or replay, so set trace
             xspdb.set_trace()
+    wave_at_last = (args.wave_begin != args.wave_end) and (args.wave_end <= 0)
     if args.pc_commits != 0:
-        return run_commits(xspdb, args.pc_commits)
+        cycle_index = xspdb.dut.xclock.clk
+        run_commits(xspdb, args.pc_commits)
+        run_cycles = xspdb.dut.xclock.clk - cycle_index
+        if run_cycles >= args.wave_end or wave_at_last:
+            XSPdb.info("Waveform off at HW cycle = %d (simulated %d cycles)" % (xspdb.dut.xclock.clk, run_cycles))
+            xspdb.api_waveform_off()
+        return
     if args.interact_at == 0:
         xspdb.set_trace()
     if not args.image:
@@ -241,12 +250,12 @@ def main(args, xspdb):
     delta = args.max_cycles
     while delta > 0 and not xspdb.api_dut_is_step_exit():
         delta = delta - emu_step(delta)
-    runned_cycles = args.max_cycles - delta
+    run_cycles = args.max_cycles - delta
     # Check if the waveform is on
-    if args.wave_begin != args.wave_end:
-        if args.wave_end <= 0 or args.wave_end >= runned_cycles:
-            xspdb.api_waveform_off()
-    XSPdb.info("Finished cycles: %d (%d ignored)" % (runned_cycles, delta))
+    if wave_at_last or args.wave_end >= run_cycles:
+        XSPdb.info("Waveform off at HW cycle = %d" % (xspdb.dut.xclock.clk))
+        xspdb.api_waveform_off()
+    XSPdb.info("Finished cycles: %d (%d ignored)" % (run_cycles, delta))
 
 
 if __name__ == "__main__":
