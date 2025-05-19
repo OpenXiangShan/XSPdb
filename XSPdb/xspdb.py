@@ -8,6 +8,7 @@ import inspect
 import pkgutil
 import signal
 import time
+import sys
 
 from XSPdb.cmd.util import message, info, error, warn, build_prefix_tree, register_commands, YELLOW, RESET, xspdb_set_log, xspdb_set_log_file, log_message
 from XSPdb.cmd.util import load_module_from_file, load_package_from_dir, set_xspdb_log_level
@@ -20,6 +21,7 @@ class XSPdb(pdb.Pdb):
                  finstr_addr=None,
                  default_mem_size=1024*1024*1024, # 1GB
                  default_flash_size=0x10000000,
+                 no_interact=False,
                  ):
         """Create a PDB debugger for XiangShan
         Args:
@@ -32,6 +34,7 @@ class XSPdb(pdb.Pdb):
             flash_base (int): Flash base address
             default_mem_size (int): Default memory size
             default_flash_size (int): Default flash size
+            no_interact (bool): No interact mode, default is False
         """
         super().__init__()
         self.dut = dut
@@ -41,6 +44,10 @@ class XSPdb(pdb.Pdb):
         self.finstr_addr = mem_base if finstr_addr is None else finstr_addr
         self.flash_base = flash_base
         self.flash_ends = flash_base + default_flash_size
+        self.no_interact = no_interact
+        signal.signal(signal.SIGINT, self._sigint_handler)
+        if no_interact:
+            info("Start XSPdb whit no_interact config, press Ctrl+C will interrupt the program")
         self.dut_tree = None
         self.prompt = "(XiangShan) "
         self.in_tui = False
@@ -71,18 +78,24 @@ class XSPdb(pdb.Pdb):
         self.sigint_callback = []
         self.log_cmd_prefix = "@cmd{"
         self.log_cmd_suffix = "}"
-        signal.signal(signal.SIGINT, self._sigint_handler)
 
     def _sigint_handler(self, s, f):
         self.interrupt = True
         warn("[Ctrl+C] Interrupted")
         for f in self.sigint_callback:
             f(self)
+        if self.no_interact:
+            warn("No interact mode, exit(-1)")
+            raise sys.exit(-1)
 
     def __del__(self):
         """Destructor"""
         if self.sigint_original_handler:
             signal.signal(signal.SIGINT, self.sigint_original_handler)
+
+    def is_no_interact(self):
+        """Check if no interact mode"""
+        return self.no_interact
 
     def get_dut_tree(self):
         """Get the DUT tree"""
