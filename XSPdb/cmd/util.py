@@ -80,34 +80,36 @@ def log_message(*a, **k):
 
 def message(*a, **k):
     """Print a message"""
+    k["flush"] = True
     print(*a, **k)
+    del k["flush"]
     log_message(*a, **k)
 
 def info(msg):
     """Print information"""
     if _XSPDB_LOG_LEVEL <= logging.INFO:
-        print(f"{GREEN}[Info] %s{RESET}" % msg)
+        print(f"{GREEN}[Info] %s{RESET}" % msg, flush=True)
     if _xspdb_enable_log:
         _xspdb_logger.info("[Info] %s" % msg)
 
 def debug(msg):
     """Print debug information"""
     if _XSPDB_LOG_LEVEL <= logging.DEBUG:
-        print("[Debug] %s" % msg)
+        print("[Debug] %s" % msg, flush=True)
     if _xspdb_enable_log:
         _xspdb_logger.debug("[Debug] %s" % msg)
 
 def error(msg):
     """Print error information"""
     if _XSPDB_LOG_LEVEL <= logging.ERROR:
-        print(f"{RED}[Error] %s{RESET}" % msg)
+        print(f"{RED}[Error] %s{RESET}" % msg, flush=True)
     if _xspdb_enable_log:
         _xspdb_logger.error("[Error] %s" % msg)
 
 def warn(msg):
     """Print warning information"""
     if _XSPDB_LOG_LEVEL <= logging.WARNING:
-        print(f"{YELLOW}[Warn] %s{RESET}" % msg)
+        print(f"{YELLOW}[Warn] %s{RESET}" % msg, flush=True)
     if _xspdb_enable_log:
         _xspdb_logger.warning("[Warn] %s" % msg)
 
