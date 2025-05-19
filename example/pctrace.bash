@@ -29,6 +29,11 @@ LOG_DIR=${2:-./log}
 echo "Target directory: $TARGET_DIR" "Log directory: $LOG_DIR"
 mkdir -p $LOG_DIR
 
+elf_files=($(find "$TARGET_DIR" -name "*.elf"))
+total_files=${#elf_files[@]}
+used_files=0
+start_time=$(date +%s)
+
 for elf in `find $TARGET_DIR -name *.elf`; do
     save_alg=$LOG_DIR/"${elf//\//_}".all.log
     save_log=$LOG_DIR/"${elf//\//_}".exec.log
@@ -39,9 +44,18 @@ for elf in `find $TARGET_DIR -name *.elf`; do
     ARGS="$ARGS --log-file $save_log --log-level warn --wave-path $save_fst -e -1"
     # run the emu.py
     stdbuf -oL -eL $EMU_PY_PATH $ARGS 2>&1|tee $save_alg
-    if $!; then
-        echo "Execution failed. May CTR-C interrupted, check the log file for details."
+    ret_code=${PIPESTATUS[0]}
+    if [[ $ret_code -ne 0 ]]; then
+        echo "exit witch code $ret_code May be interrupted, check the log file for details."
         exit 1
     fi
-    echo "ELF: $elf  ->  $save_log"
+    used_files=$((used_files + 1))
+    percent=$((used_files * 100 / total_files))
+    now_time=$(date +%s)
+    elapsed_time=$((now_time - start_time))
+    remain_time=$((elapsed_time * (total_files - used_files) / used_files))
+    finish_time=$(date -d "@$((start_time + remain_time))" "+%Y-%m-%d %H:%M:%S")
+    echo "run: $elf  complete"
+    echo "Progress: $used_files / $total_files ($percent%)"
+    echo -e "Elapsed: ${elapsed_time}s, Estimated finish: $finish_time (remian: ${remain_time}s)\n"
 done
