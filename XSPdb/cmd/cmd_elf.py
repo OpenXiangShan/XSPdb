@@ -124,7 +124,7 @@ class CmdEfl:
         symbol_pre_name = "None"
         if symbol_pre:
             symbol_pre_name = ','.join([s['name'] for s in symbol_pre])
-        message(f"PC block changed({hex(last_block_addr)} = > {hex(symbol_addr)}): {symbol_pre_name} -> {symbol_name}")
+        message(f"PC block changed({hex(last_block_addr)} = > {hex(symbol_addr)}, cycle: {self.difftest_stat.trap.cycleCnt}): {symbol_pre_name} -> {symbol_name}")
         return symbol_addr
 
     def api_turn_on_pc_symbol_block_change(self, value = True):
