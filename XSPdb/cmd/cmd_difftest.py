@@ -15,6 +15,7 @@ class CmdDiffTest:
         self.difftest_diff_is_run = False
         self.istep_last_commit_pc = []
         self.data_last_symbol_block = -1
+        self.data_last_symbol_pc = -1
 
     def api_load_ref_so(self, so_path):
         """Load the difftest reference shared object
@@ -340,8 +341,11 @@ class CmdDiffTest:
                 break
             elif self.dut.xclock.IsDisable():
                 self.api_istep_update_commit_pc()
-                self.data_last_symbol_block = self.api_echo_pc_symbol_block_change(max(self.api_get_istep_last_commit_pc() + [-1]),
-                                                                                   self.data_last_symbol_block)
+                pc = max(self.api_get_istep_last_commit_pc() + [-1])
+                self.data_last_symbol_block = self.api_echo_pc_symbol_block_change(pc,
+                                                                                   self.data_last_symbol_block,
+                                                                                   self.data_last_symbol_pc)
+                self.data_last_symbol_pc = pc
             elif v == 10000:
                 warn("step %d cycles complete, but no instruction commit find" % v)
                 step_taken -= 1 # ignore record

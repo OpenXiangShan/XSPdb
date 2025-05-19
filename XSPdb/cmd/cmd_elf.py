@@ -97,7 +97,7 @@ class CmdEfl:
         info(f"Loaded {count} symbols from {self.exec_bin_file}")
         return True
 
-    def api_echo_pc_symbol_block_change(self, current_pc, last_block_addr):
+    def api_echo_pc_symbol_block_change(self, current_pc, last_block_addr, last_pc):
         block_addr = last_block_addr
         if current_pc < 0:
             return block_addr
@@ -124,7 +124,11 @@ class CmdEfl:
         symbol_pre_name = "None"
         if symbol_pre:
             symbol_pre_name = ','.join([s['name'] for s in symbol_pre])
-        message(f"PC block changed({hex(last_block_addr)} = > {hex(symbol_addr)}, cycle: {self.difftest_stat.trap.cycleCnt}): {symbol_pre_name} -> {symbol_name}")
+        delta_last = last_pc-last_block_addr
+        delta_curr = current_pc-symbol_addr
+        message(f"PC block changed({hex(last_pc)} = > {hex(current_pc)}, " +
+                f"cycle: {self.difftest_stat.trap.cycleCnt}): {symbol_pre_name}({hex(last_block_addr)})+{hex(delta_last)} " +
+                f"-> {symbol_name}({hex(symbol_addr)})+{hex(delta_curr)}")
         return symbol_addr
 
     def api_turn_on_pc_symbol_block_change(self, value = True):
