@@ -33,12 +33,27 @@ elf_files=($(find "$TARGET_DIR" -name "*.elf"))
 total_files=${#elf_files[@]}
 used_files=0
 start_time=$(date +%s)
+process_log=$LOG_DIR"/process-${start_time}.log"
+
+debug() {
+    echo -e $@ | tee -a $process_log
+}
+
+seconds_to_hms() {
+    local total_seconds=$1
+    local hours=$((total_seconds / 3600))
+    local minutes=$(( (total_seconds % 3600) / 60 ))
+    local seconds=$((total_seconds % 60))
+    printf "%02d:%02d:%02d" $hours $minutes $seconds
+}
 
 for elf in `find $TARGET_DIR -name *.elf`; do
-    save_alg=$LOG_DIR/"${elf//\//_}".all.log
-    save_log=$LOG_DIR/"${elf//\//_}".exec.log
-    save_fst=$LOG_DIR/"${elf//\//_}".exec.fst
-    echo "Processing ELF: $elf"
+    log_prefix=$LOG_DIR/"${elf//\//_}"
+    save_alg=${log_prefix}".all.log"
+    save_log=${log_prefix}".exec.log"
+    save_fst=${log_prefix}".exec.fst"
+    job_start_time=$(date +%s)
+    debug "Processing ELF: $elf at $(date +%Y-%m-%d\ %H:%M:%S)"
     # construct the arguments for emu.py
     ARGS="--no-interact -s $JPZ_SC_PATH -i $elf -pc -1 --trace-pc-symbol-block-change"
     ARGS="$ARGS --log-file $save_log --log-level warn --wave-path $save_fst -e -1"
@@ -46,7 +61,7 @@ for elf in `find $TARGET_DIR -name *.elf`; do
     stdbuf -oL -eL $EMU_PY_PATH $ARGS 2>&1|tee $save_alg
     ret_code=${PIPESTATUS[0]}
     if [[ $ret_code -ne 0 ]]; then
-        echo "exit witch code $ret_code May be interrupted, check the log file for details."
+        debug "exit witch code $ret_code May be interrupted, check the log file for details."
         exit 1
     fi
     used_files=$((used_files + 1))
@@ -55,7 +70,10 @@ for elf in `find $TARGET_DIR -name *.elf`; do
     elapsed_time=$((now_time - start_time))
     remain_time=$((elapsed_time * (total_files - used_files) / used_files))
     finish_time=$(date -d "@$((start_time + remain_time))" "+%Y-%m-%d %H:%M:%S")
-    echo "run: $elf  complete"
-    echo "Progress: $used_files / $total_files ($percent%)"
-    echo -e "Elapsed: ${elapsed_time}s, Estimated finish: $finish_time (remian: ${remain_time}s)\n"
+    ctime=$(seconds_to_hms $((now_time - job_start_time)))
+    debug "run: $elf  complete at $(date +%Y-%m-%d\ %H:%M:%S) time consumed: ${ctime}"
+    debug "Progress: $used_files / $total_files ($percent%)"
+    etime=$(seconds_to_hms $elapsed_time)
+    rtime=$(seconds_to_hms $remain_time)
+    debug "Elapsed: ${etime}, Estimated finish: $finish_time (remian: ${rtime})\n"
 done
