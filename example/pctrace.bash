@@ -52,11 +52,16 @@ for elf in `find $TARGET_DIR -name *.elf`; do
     save_alg=${log_prefix}".all.log"
     save_log=${log_prefix}".exec.log"
     save_fst=${log_prefix}".exec.fst"
+    if [ -f "$save_log" ]; then
+        debug "skip $elf, log file already exists"
+        used_files=$((used_files + 1))
+        continue
+    fi
     job_start_time=$(date +%s)
     debug "Processing ELF: $elf at $(date +%Y-%m-%d\ %H:%M:%S)"
     # construct the arguments for emu.py
     ARGS="--no-interact -s $JPZ_SC_PATH -i $elf -pc -1 --trace-pc-symbol-block-change"
-    ARGS="$ARGS --log-file $save_log --log-level warn --wave-path $save_fst -e -1"
+    ARGS="$ARGS --log-file $save_log --log-level warn --wave-path $save_fst -e -1 -C 1000000000"
     # run the emu.py
     stdbuf -oL -eL $EMU_PY_PATH $ARGS 2>&1|tee $save_alg
     ret_code=${PIPESTATUS[0]}
