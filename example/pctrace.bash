@@ -1,5 +1,22 @@
 #!/bin/bash
 
+# This script is used to run the emu.py program with a set of ELF files
+# and generate logs for each ELF file.
+# It takes a target directory containing ELF files, an optional log directory,
+# and optional custom arguments to be passed to emu.py.
+# The script will find the emu.py and jump_zero.script files in the current
+# directory or its parent directory, and use them to run the emu.py program.
+# The script will create a log directory if it does not exist, and will
+# generate log files for each ELF file in the target directory.
+# The log files will be named after the ELF files, with a .all.log and
+# .exec.log extension.
+# The script will also generate a .exec.fst file for each ELF file, which
+# contains the execution trace of the ELF file.
+# The script will print the progress of the processing, including the
+# number of ELF files processed, the total number of ELF files, the
+# percentage of completion, the elapsed time, and the estimated finish
+# time.
+
 find_file() {
     for dir in "$PWD" "$(dirname "$PWD")" "$OLDPWD" "example" "ready-to-run"; do
         if [ -f "$dir/$1" ]; then
@@ -17,14 +34,16 @@ echo "emu.py found at: $EMU_PY_PATH"
 echo "jump_zero.script found at: $JPZ_SC_PATH"
 
 if [ $# -lt 1 ]; then
-    echo "Usage: $0 <target_directory> [log_directory]"
+    echo "Usage: $0 <target_directory> [log_directory] [custom_arguments]"
     echo "    target_directory: the directory containing the .elf files to be processed"
     echo "       log_directory: pc log dir, defaults to ./log"
+    echo "    custom_arguments: additional arguments to be passed to emu.py"
     exit 1
 fi
 
 TARGET_DIR=$1
 LOG_DIR=${2:-./log}
+CARGS=${@:3}
 
 echo "Target directory: $TARGET_DIR" "Log directory: $LOG_DIR"
 mkdir -p $LOG_DIR
@@ -61,7 +80,7 @@ for elf in `find $TARGET_DIR -name *.elf`; do
     debug "Processing ELF: $elf at $(date +%Y-%m-%d\ %H:%M:%S)"
     # construct the arguments for emu.py
     ARGS="--no-interact -s $JPZ_SC_PATH -i $elf -pc -1 --trace-pc-symbol-block-change"
-    ARGS="$ARGS --log-file $save_log --log-level warn --wave-path $save_fst -e -1 -C 1000000000"
+    ARGS="$ARGS --log-file $save_log --log-level warn --wave-path $save_fst -e -1 -C 1000000000 $CARGS"
     # run the emu.py
     stdbuf -oL -eL $EMU_PY_PATH $ARGS 2>&1|tee $save_alg
     ret_code=${PIPESTATUS[0]}
