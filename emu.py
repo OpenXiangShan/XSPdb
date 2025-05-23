@@ -4,6 +4,7 @@ import os
 import sys
 import argparse
 import logging
+import time
 
 logging_level_map = {"debug": logging.DEBUG,
                       "info": logging.INFO,
@@ -58,6 +59,16 @@ except ImportError as e:
 
 def args_parser():
     address = lambda s: int(s, 0)
+    def timesec(s):
+        s = s.strip().lower()
+        if s.endswith("s"):
+            return int(s[:-1])
+        elif s.endswith("m"):
+            return int(s[:-1]) * 60
+        elif s.endswith("h"):
+            return int(s[:-1]) * 3600
+        else:
+            raise ValueError(f"Invalid time format: {s}")
     parser = argparse.ArgumentParser(description="XSPdb Emulation Tool")
     parser.add_argument("-v", "--version", action="version", version=f"XSPdb {XSPdb.__version__}")
     parser.add_argument("-C", "--max-cycles", type=int, default=0xFFFFFFFFFFFFFFFF, help="maximum simulation cycles to execute")
@@ -85,6 +96,7 @@ def args_parser():
     parser.add_argument("--flash-base-address", type=address, default=0x10000000, help="base address of flash")
     parser.add_argument("--diff-first-inst_address", type=address, default=-1, help="first instruction address for difftest")
     parser.add_argument("--trace-pc-symbol-block-change", action="store_true", default=False, help="enable tracing of PC symbol block changes")
+    parser.add_argument("--max-run-time", type=timesec, default=0, help="maximum run time (eg 10s, 1m, 1h)")
     return parser.parse_args()
 
 
@@ -99,6 +111,11 @@ def parse_mem_size(size_str):
     else:
         raise ValueError(f"Invalid memory size format: {size_str}")
 
+def timesec_to_str(t):
+    h = int(t // 3600)
+    m = int((t % 3600) // 60)
+    s = int(t % 60)
+    return f"{h:02}:{m:02}:{s:02}"
 
 def run_script(xspdb, script_path, it_time):
     xspdb.api_exec_script(script_path, gap_time=it_time)
@@ -117,14 +134,37 @@ def run_replay(xspdb, replay_path, it_time):
     return False
 
 
-def run_commits(xspdb, commits):
+def run_commits(xspdb, commits, max_run_time):
+    time_start = time.time()
     if commits < 0:
         commits = 0xFFFFFFFFFFFFFF
-    delta = commits
-    while delta > 0 and not xspdb.api_dut_is_step_exit():
-        delta = delta - xspdb.api_xistep(delta)
-        check_is_need_trace(xspdb)
-    xspdb.message(f"Execute {commits - delta} commits completed")
+    batch_size = 100
+    batch_count = commits // batch_size
+    batch_remain = commits % batch_size
+    reach_max_time = False
+    def run_delta(delta):
+        nonlocal reach_max_time
+        runc = 0
+        while delta > 0 and not xspdb.api_dut_is_step_exit():
+            c = xspdb.api_xistep(delta)
+            runc += c
+            delta = delta - c
+            check_is_need_trace(xspdb)
+            delta_time = time.time() - time_start
+            if delta_time > max_run_time and max_run_time > 0:
+                XSPdb.info(f"Max run time {timesec_to_str(max_run_time)} reached (runed {timesec_to_str(delta_time)}), exit instruction execution")
+                reach_max_time = True
+                break
+        return runc
+    run_ins = 0
+    for _ in range(batch_count):
+        if not reach_max_time:
+           run_ins += run_delta(batch_size)
+        else:
+            break
+    if not reach_max_time:
+        run_ins += run_delta(batch_remain)
+    xspdb.message(f"Execute {run_ins} commits completed ({commits - run_ins} ignored)")
 
 
 def create_xspdb():
@@ -236,7 +276,7 @@ def main(args, xspdb):
     wave_at_last = (args.wave_begin != args.wave_end) and (args.wave_end <= 0)
     if args.pc_commits != 0:
         cycle_index = xspdb.dut.xclock.clk
-        run_commits(xspdb, args.pc_commits)
+        run_commits(xspdb, args.pc_commits, args.max_run_time)
         run_cycles = xspdb.dut.xclock.clk - cycle_index
         if run_cycles >= args.wave_end or wave_at_last:
             XSPdb.info("Waveform off at HW cycle = %d (simulated %d cycles)" % (xspdb.dut.xclock.clk, run_cycles))
@@ -247,10 +287,34 @@ def main(args, xspdb):
     if not args.image:
         XSPdb.warn("No image to execute, Entering the interactive debug mode")
         xspdb.set_trace()
-    delta = args.max_cycles
-    while delta > 0 and not xspdb.api_dut_is_step_exit():
-        delta = delta - emu_step(delta)
-    run_cycles = args.max_cycles - delta
+    cycle_batch_size = 10000
+    cycle_batch_count = args.max_cycles // cycle_batch_size
+    cycle_batch_remain = args.max_cycles % cycle_batch_size
+    cycle_reach_max_time = False
+    time_start = time.time()
+    def run_cycle_deta(delta):
+        nonlocal cycle_reach_max_time
+        runc = 0
+        while delta > 0 and not xspdb.api_dut_is_step_exit():
+            c = emu_step(delta)
+            runc += c
+            delta = delta - c
+            check_is_need_trace(xspdb)
+            delta_time = time.time() - time_start
+            if delta_time > args.max_run_time and args.max_run_time > 0:
+                cycle_reach_max_time = True
+                XSPdb.info(f"Max run time {timesec_to_str(args.max_run_time)} reached (runed {timesec_to_str(delta_time)}), exit cycle execution")
+                break
+        return runc
+    run_cycles = 0
+    for _ in range(cycle_batch_count):
+        if not cycle_reach_max_time:
+            run_cycles += run_cycle_deta(cycle_batch_size)
+        else:
+            break
+    if not cycle_reach_max_time:
+        run_cycles += run_cycle_deta(cycle_batch_remain)
+    delta = args.max_cycles - run_cycles
     # Check if the waveform is on
     if wave_at_last or args.wave_end >= run_cycles:
         XSPdb.info("Waveform off at HW cycle = %d" % (xspdb.dut.xclock.clk))
