@@ -78,6 +78,76 @@ LD_PRELOAD=XSPython/xspcomm/libxspcomm.so.0.0.1 PYTHONPATH=. python3 example/tes
 
 使用LD_PRELOAD提前加载xspcomm的原因是防止本地系统xspcomm库与XSPython中的，有版本冲突.
 
+### 命令行模式（非交互）：
+
+除了提供交互模式外，XSPdb也提供了批处理模式，可以把它当成一个全系统仿真器使用，其入口为 `emu.py`，例如
+
+```bash
+./emu.py -i ready-to-run/microbench.bin
+```
+
+`emu.py`在执行过程中，可以通过 ctrl+c 中断进入XSPdb交互模式。具体命令行参数如下：
+
+```bash
+usage: emu.py [-h] [-v] [-C MAX_CYCLES] [-i IMAGE] [-b WAVE_BEGIN] [-e WAVE_END] [-t INTERACT_AT] [-l] [--log-file LOG_FILE]
+              [-bi BATCH_INTERVAL] [-s SCRIPT] [-r REPLAY] [--debug-level {debug,info,warn,erro}]
+              [--log-level {debug,info,warn,erro}] [-pc PC_COMMITS] [--sim-args SIM_ARGS] [-F FLASH] [--no-interact]
+              [--wave-path WAVE_PATH] [--ram-size RAM_SIZE] [--diff DIFF] [--cmds CMDS] [--cmds-post CMDS_POST]
+              [--mem-base-address MEM_BASE_ADDRESS] [--flash-base-address FLASH_BASE_ADDRESS]
+              [--diff-first-inst_address DIFF_FIRST_INST_ADDRESS] [--trace-pc-symbol-block-change] [--max-run-time MAX_RUN_TIME]
+
+XSPdb Emulation Tool
+
+options:
+  -h, --help            show this help message and exit
+  -v, --version         show program's version number and exit
+  -C MAX_CYCLES, --max-cycles MAX_CYCLES
+                        maximum simulation cycles to execute
+  -i IMAGE, --image IMAGE
+                        image file to load and run
+  -b WAVE_BEGIN, --wave-begin WAVE_BEGIN
+                        start waveform dump at the specified cycle
+  -e WAVE_END, --wave-end WAVE_END
+                        stop waveform dump at the specified cycle
+  -t INTERACT_AT, --interact-at INTERACT_AT
+                        enter interactive mode at the specified cycle
+  -l, --log             enable logging output
+  --log-file LOG_FILE   log file name (default: ./XSPdb.log)
+  -bi BATCH_INTERVAL, --batch-interval BATCH_INTERVAL
+                        interval time (seconds) between batch commands
+  -s SCRIPT, --script SCRIPT
+                        script file to execute
+  -r REPLAY, --replay REPLAY
+                        replay log file
+  --debug-level {debug,info,warn,erro}
+                        set debug level
+  --log-level {debug,info,warn,erro}
+                        set log level
+  -pc PC_COMMITS, --pc-commits PC_COMMITS
+                        run until the specified number of commits; -1 means no limit
+  --sim-args SIM_ARGS   additional simulator arguments (comma-separated)
+  -F FLASH, --flash FLASH
+                        flash binary file for simulation
+  --no-interact         disable interactive mode (do not handle the ctrl-c signal)
+  --wave-path WAVE_PATH
+                        output path for waveform file
+  --ram-size RAM_SIZE   simulation RAM size (e.g., 8GB or 128MB)
+  --diff DIFF           path to REF shared object for difftest testing
+  --cmds CMDS           XSPdb commands to execute before run (\n for newline)
+  --cmds-post CMDS_POST
+                        XSPdb commands to execute after script/replay (\n for newline)
+  --mem-base-address MEM_BASE_ADDRESS
+                        base address of memory
+  --flash-base-address FLASH_BASE_ADDRESS
+                        base address of flash
+  --diff-first-inst_address DIFF_FIRST_INST_ADDRESS
+                        first instruction address for difftest
+  --trace-pc-symbol-block-change
+                        enable tracing of PC symbol block changes
+  --max-run-time MAX_RUN_TIME
+                        maximum run time (eg 10s, 1m, 1h)
+```
+
 ### 常用命令：
 
 - `xload` Load a binary file into memory （加载指定bin文件到内存）
