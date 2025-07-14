@@ -26,7 +26,7 @@ class CmdEfl:
             error(f"{elf_file} not found")
             return None
         readelf = find_executable_in_dirs("readelf", search_dirs=search_dirs)
-        cmd = [readelf, "-s", elf_file]
+        cmd = [readelf, "-sW", elf_file]
         try:
             output = subprocess.check_output(cmd, stderr=subprocess.STDOUT)
             lines = output.decode().splitlines()
