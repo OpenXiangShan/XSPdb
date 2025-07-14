@@ -1,4 +1,5 @@
 # XSPdb
+.history/
 tmp/
 ready-to-run/*
 *.tar.gz
