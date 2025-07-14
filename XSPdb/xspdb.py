@@ -45,6 +45,7 @@ class XSPdb(pdb.Pdb):
         self.flash_base = flash_base
         self.flash_ends = flash_base + default_flash_size
         self.no_interact = no_interact
+        self.interrupt_count = 0
         signal.signal(signal.SIGINT, self._sigint_handler)
         if no_interact:
             info("Start XSPdb whit no_interact config, press Ctrl+C will interrupt the program")
@@ -87,6 +88,11 @@ class XSPdb(pdb.Pdb):
         if self.no_interact:
             warn("No interact mode, exit(-1)")
             raise sys.exit(-1)
+        self.interrupt_count += 1
+        if self.interrupt_count > 3:
+            warn("Too many interrupts, force entering pdb")
+            self.set_trace()
+            self.interrupt_count = 0
 
     def __del__(self):
         """Destructor"""
