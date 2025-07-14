@@ -158,7 +158,7 @@ def run_commits(xspdb, commits, max_run_time):
         return runc
     run_ins = 0
     for _ in range(batch_count):
-        if not reach_max_time:
+        if not reach_max_time and not xspdb.api_dut_is_step_exit():
            run_ins += run_delta(batch_size)
         else:
             break
@@ -308,7 +308,7 @@ def main(args, xspdb):
         return runc
     run_cycles = 0
     for _ in range(cycle_batch_count):
-        if not cycle_reach_max_time:
+        if not cycle_reach_max_time and not xspdb.api_dut_is_step_exit():
             run_cycles += run_cycle_deta(cycle_batch_size)
         else:
             break
