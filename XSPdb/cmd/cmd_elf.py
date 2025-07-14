@@ -32,9 +32,11 @@ class CmdEfl:
             lines = output.decode().splitlines()
             symbol_value_dict = {}
             symbol_name_dict = {}
+            symbol_type_dict = {}
+            symbol_gnored = {}
             for line in lines[1:]:
                 parts = line.split()
-                if len(parts) < 8:
+                if len(parts) != 8:
                     continue
                 if parts[1].lower() == "value":
                     continue
@@ -46,13 +48,25 @@ class CmdEfl:
                          "ndx": parts[6],
                          "name": parts[7],
                          }
-                if value["ndx"] not in ("1", "2", ".text", ".data"):
-                    continue
+                if value["type"] in ("NOTYPE", "FILE"):
+                    if value["ndx"] not in ("1", "2", ".text", ".data"):
+                        if value["type"] not in symbol_gnored:
+                            symbol_gnored[value["type"]] = 1
+                        else:
+                            symbol_gnored[value["type"]] += 1
+                        continue
                 symbol_name_dict[value["name"]] = value
+                if value["type"] not in symbol_type_dict:
+                    symbol_type_dict[value["type"]] = 1
+                else:
+                    symbol_type_dict[value["type"]] += 1
                 if symbol_value_dict.get(value["addr"]) is None:
                     symbol_value_dict[value["addr"]] = [value]
                 else:
                     symbol_value_dict[value["addr"]].append(value)
+            info("Find symbol: %s" % symbol_type_dict)
+            if len(symbol_gnored) > 0:
+                warn("Ignored symbol: %s" % symbol_gnored)
             return {"addr": symbol_value_dict,
                     "name": symbol_name_dict,
                     "sorted_addr": sorted(symbol_value_dict.keys()),
