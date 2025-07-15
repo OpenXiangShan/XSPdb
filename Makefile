@@ -3,19 +3,26 @@ all: test
 
 init:
 	@python3 -m pip install -r requirements.txt
-	@if [ ! -f ready-to-run.tar.gz ]; then \
-		echo "ready-to-run.tar.gz not found, downloading..."; \
-		wget https://github.com/OpenXiangShan/XSPdb/releases/download/v0.1.0-test/ready-to-run.tar.gz; \
+	@if [ ! -d ready-to-run ]; then \
+		if [ ! -f ready-to-run.tar.gz ]; then \
+			echo "ready-to-run directory and ready-to-run.tar.gz not found, downloading..."; \
+			wget https://github.com/OpenXiangShan/XSPdb/releases/download/v0.1.0-test/ready-to-run.tar.gz; \
+		else \
+			echo "ready-to-run.tar.gz already exists, skipping download."; \
+		fi; \
 	else \
-		echo "ready-to-run.tar.gz already exists, skipping download."; \
+		echo "ready-to-run directory already exists, skipping download."; \
 	fi
-	@if [ ! -f XSPython.tar.gz ]; then \
-		echo "XSPython.tar.gz not found, downloading..."; \
-		wget https://github.com/OpenXiangShan/XSPdb/releases/download/v0.1.0-test/XSPython.tar.gz; \
+	@if [ ! -d XSPython ]; then \
+		if [ ! -f XSPython.tar.gz ]; then \
+			echo "XSPython directory and XSPython.tar.gz not found, downloading..."; \
+			wget https://github.com/OpenXiangShan/XSPdb/releases/download/v0.1.0-test/XSPython.tar.gz; \
+		else \
+			echo "XSPython.tar.gz already exists, skipping download."; \
+		fi; \
 	else \
-		echo "XSPython.tar.gz already exists, skipping download."; \
+		echo "XSPython directory already exists, skipping download."; \
 	fi
-	
 
 ready-to-run: init
 	@if [ ! -d ready-to-run ]; then \
