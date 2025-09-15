@@ -27,7 +27,6 @@ import argparse
 import errno
 import fcntl
 import glob
-import hashlib
 import json
 import os
 import pty
@@ -92,93 +91,17 @@ def get_winsize(fd):
         return 24, 80
 
 
-class FileSnap:
-    def __init__(self, base, manifest_path):
-        self.base = base
-        self.manifest = manifest_path
+from XSPdb.cmd.ckpt_utils import load_manifest, copy_in, write_files_index, restore_files
 
-    def _load_manifest(self):
-        data = {"include": []}
-        try:
-            if os.path.exists(self.manifest):
-                with open(self.manifest, "r") as f:
-                    j = json.load(f)
-                    if isinstance(j, dict):
-                        data.update(j)
-        except Exception:
-            pass
-        return data
-
-    def _collect_files(self):
-        mf = self._load_manifest()
-        patterns = mf.get("include", [])
-        files = set()
-        for pat in patterns:
-            for m in glob.glob(pat, recursive=True):
-                if os.path.isfile(m):
-                    files.add(os.path.abspath(m))
-        return sorted(list(files))
-
-    def _rel_target(self, path):
-        ap = os.path.abspath(path)
-        try:
-            rel = os.path.relpath(ap, self.base)
-            if rel.startswith(".."):  # outside base
-                return os.path.join("abs", ap.lstrip(os.sep))
-            return rel
-        except Exception:
-            return os.path.join("abs", ap.lstrip(os.sep))
-
-    def _sha256(self, path):
-        try:
-            h = hashlib.sha256()
-            with open(path, 'rb') as f:
-                for chunk in iter(lambda: f.read(8192), b''):
-                    h.update(chunk)
-            return h.hexdigest()
-        except Exception:
-            return None
-
-    def snapshot(self, dst_dir):
-        os.makedirs(dst_dir, exist_ok=True)
-        files = self._collect_files()
-        for src in files:
-            rel = self._rel_target(src)
-            dd = os.path.join(dst_dir, rel)
-            os.makedirs(os.path.dirname(dd), exist_ok=True)
-            try:
-                shutil.copy2(src, dd)
-            except Exception:
-                pass
-        index = []
-        for src in files:
-            rel = self._rel_target(src)
-            dd = os.path.join(dst_dir, rel)
-            index.append({"src": os.path.abspath(src), "rel": rel, "sha256": self._sha256(dd)})
-        try:
-            with open(os.path.join(dst_dir, "files_index.json"), "w") as f:
-                json.dump(index, f, indent=2)
-        except Exception:
-            pass
-
-    def restore(self, src_dir):
-        idx = os.path.join(src_dir, "files_index.json")
-        try:
-            with open(idx, "r") as f:
-                index = json.load(f)
-        except Exception:
-            index = []
-        for ent in index:
-            rel = ent.get("rel")
-            ss = os.path.join(src_dir, rel)
-            dd = ent.get("src")
-            if not (rel and dd and os.path.isfile(ss)):
-                continue
-            os.makedirs(os.path.dirname(dd), exist_ok=True)
-            try:
-                shutil.copy2(ss, dd)
-            except Exception:
-                pass
+def _collect_manifest_files(manifest_path):
+    mf = load_manifest(manifest_path)
+    patterns = mf.get("include", [])
+    files = set()
+    for pat in patterns:
+        for m in glob.glob(pat, recursive=True):
+            if os.path.isfile(m):
+                files.add(os.path.abspath(m))
+    return sorted(list(files))
 
 
 class CkptServer:
@@ -187,7 +110,7 @@ class CkptServer:
         self.ckpt_dir = ckpt_dir
         self.child_pid = child_pid
         self.base = base
-        self.snap = FileSnap(base, manifest)
+        self.manifest = manifest
         try:
             os.unlink(self.sock_path)
         except FileNotFoundError:
@@ -255,7 +178,10 @@ class CkptServer:
         dst = ckpt_path(self.ckpt_dir, name)
         os.makedirs(dst, exist_ok=True)
         # files snapshot
-        self.snap.snapshot(os.path.join(dst, "files"))
+        files = _collect_manifest_files(self.manifest)
+        files_dir = os.path.join(dst, "files")
+        copy_in(files, files_dir, self.base)
+        write_files_index(files, files_dir, self.base)
         args = [
             "criu", "dump",
             "-t", str(self.child_pid),
@@ -284,7 +210,7 @@ class CkptServer:
         # restore files first
         files_dir = os.path.join(src, "files")
         if os.path.isdir(files_dir):
-            self.snap.restore(files_dir)
+            restore_files(files_dir)
         pidfile = os.path.join(src, "restored.pid")
         args = [
             "criu", "restore",
@@ -306,7 +232,11 @@ class CkptServer:
 
 
 class PTYFrontend:
-    def __init__(self, ckpt_dir, sock_path, target_argv, prefix_key='\x01', cmd_key=b'c'):
+    def __init__(self, ckpt_dir, sock_path, target_argv, prefix_key='\x01', cmd_key=b'c',
+                 pre_save_backend_cmds=None, pre_restore_backend_cmds=None,
+                 enable_lazy_pages=False, enable_track_mem=False, prev_images_dir=None,
+                 pre_save_py=None, post_save_py=None,
+                 pre_restore_py=None, post_restore_py=None):
         self.ckpt_dir = os.path.abspath(ckpt_dir)
         self.sock_path = os.path.abspath(sock_path)
         self.target = target_argv
@@ -323,6 +253,18 @@ class PTYFrontend:
         self.server = None
         self.base = os.path.abspath(os.getcwd())
         self.manifest = os.environ.get("XSPDB_CKPT_MANIFEST", os.path.join(self.ckpt_dir, "manifest.json"))
+        # simple backend command hooks
+        self.pre_save_backend_cmds = pre_save_backend_cmds or []
+        self.pre_restore_backend_cmds = pre_restore_backend_cmds or []
+        # CRIU accelerations
+        self.enable_lazy_pages = bool(enable_lazy_pages)
+        self.enable_track_mem = bool(enable_track_mem)
+        self.prev_images_dir = prev_images_dir
+        # python hooks
+        self.pre_save_py = pre_save_py
+        self.post_save_py = post_save_py
+        self.pre_restore_py = pre_restore_py
+        self.post_restore_py = post_restore_py
 
     def _enter_raw(self):
         self._orig_term = termios.tcgetattr(sys.stdin.fileno())
@@ -395,6 +337,32 @@ class PTYFrontend:
         except Exception:
             pass
 
+    def _inject_backend_cmds(self, cmds):
+        if not cmds:
+            return
+        # Temporarily resume backend to accept commands
+        try:
+            os.kill(self.child_pid, signal.SIGCONT)
+        except Exception:
+            pass
+        for line in cmds:
+            try:
+                os.write(self.master_fd, (line + "\n").encode())
+            except Exception:
+                pass
+        # Re-stop backend to keep command-mode semantics
+        try:
+            os.kill(self.child_pid, signal.SIGSTOP)
+        except Exception:
+            pass
+
+    # Public helpers for python hooks
+    def hook_inject_backend_cmds(self, cmds):
+        return self._inject_backend_cmds(cmds)
+
+    def hook_child_pid(self):
+        return self.child_pid
+
     def _enter_cmd_mode(self):
         if self._cmd_mode:
             return
@@ -446,11 +414,32 @@ class PTYFrontend:
                     os.write(sys.stdout.fileno(), f"{d}{tag}\r\n".encode())
         elif cmd == 'save':
             name = args[0] if args else time.strftime("ckpt-%Y%m%d-%H%M%S")
+            # Hooks: pre-save python and backend cmds (e.g., xwave_flush)
+            try:
+                if callable(self.pre_save_py):
+                    self.pre_save_py(self)
+            except Exception:
+                pass
+            # NOTE: In command mode, backend is SIGSTOP; we resume briefly to inject
+            self._inject_backend_cmds(self.pre_save_backend_cmds)
             ok, msg = self._save(name)
             out = msg or ("save ok" if ok else "save failed")
             os.write(sys.stdout.fileno(), ("[ckpt] " + out + "\r\n").encode())
+            try:
+                if callable(self.post_save_py):
+                    self.post_save_py(self)
+            except Exception:
+                pass
         elif cmd == 'restore':
             name = args[0] if args else 'latest'
+            # Hooks before stopping backend
+            try:
+                if callable(self.pre_restore_py):
+                    self.pre_restore_py(self)
+            except Exception:
+                pass
+            # Optionally inject backend commands before restore (best-effort)
+            self._inject_backend_cmds(self.pre_restore_backend_cmds)
             # Ensure no double-write: stop/kill old before restore
             try:
                 os.kill(self.child_pid, signal.SIGTERM)
@@ -467,6 +456,11 @@ class PTYFrontend:
                     self.server.update_child(new_pid)
             out = msg or ("restore ok" if ok else "restore failed")
             os.write(sys.stdout.fileno(), ("[ckpt] " + out + "\r\n").encode())
+            try:
+                if callable(self.post_restore_py):
+                    self.post_restore_py(self)
+            except Exception:
+                pass
         elif cmd == 'exit':
             self._exit_cmd_mode()
             return
@@ -485,7 +479,10 @@ class PTYFrontend:
         dst = ckpt_path(self.ckpt_dir, name)
         os.makedirs(dst, exist_ok=True)
         # files snapshot
-        FileSnap(self.base, self.manifest).snapshot(os.path.join(dst, "files"))
+        files = _collect_manifest_files(self.manifest)
+        files_dir = os.path.join(dst, "files")
+        copy_in(files, files_dir, self.base)
+        write_files_index(files, files_dir, self.base)
         args = [
             "criu", "dump",
             "-t", str(self.child_pid),
@@ -495,6 +492,10 @@ class PTYFrontend:
             "--file-locks",
             "--leave-running",
         ]
+        if self.enable_track_mem:
+            args.append("--track-mem")
+        if self.prev_images_dir:
+            args += ["--prev-images-dir", self.prev_images_dir]
         r = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         if r.returncode != 0:
             return False, (r.stderr.strip() or r.stdout.strip() or "criu dump failed")
@@ -511,7 +512,9 @@ class PTYFrontend:
         src = ckpt_path(self.ckpt_dir, name)
         if not os.path.isdir(src):
             return False, f"checkpoint not found: {name}", None
-        FileSnap(self.base, self.manifest).restore(os.path.join(src, "files"))
+        files_dir = os.path.join(src, "files")
+        if os.path.isdir(files_dir):
+            restore_files(files_dir)
         pidfile = os.path.join(src, "restored.pid")
         args = [
             "criu", "restore",
@@ -520,6 +523,10 @@ class PTYFrontend:
             "-d",
             "--pidfile", pidfile,
         ]
+        if self.enable_lazy_pages:
+            args.append("--lazy-pages")
+        if self.prev_images_dir:
+            args += ["--prev-images-dir", self.prev_images_dir]
         r = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         if r.returncode != 0:
             return False, (r.stderr.strip() or r.stdout.strip() or "criu restore failed"), None
@@ -626,6 +633,10 @@ def main():
     ap.add_argument("--sock", default=".xspdb_ckpt/sock", help="unix socket path for control")
     ap.add_argument("--prefix-key", default="^A", help="control prefix key (e.g., ^A for Ctrl-A)")
     ap.add_argument("--cmd-key", default="c", help="command-mode key after prefix (single char)")
+    # CRIU acceleration options
+    ap.add_argument("--lazy-pages", action="store_true", help="enable CRIU lazy-pages on restore")
+    ap.add_argument("--track-mem", action="store_true", help="enable CRIU track-mem on dump")
+    ap.add_argument("--prev-images-dir", default="", help="CRIU previous images dir for incremental/optimized operations")
     ap.add_argument("--", dest="dashdash", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("target", nargs=argparse.REMAINDER, help="target command to run after --")
     args = ap.parse_args()
@@ -644,7 +655,13 @@ def main():
         prefix = s
 
     cmd_key = args.cmd_key.encode() if len(args.cmd_key) == 1 else b'c'
-    fe = PTYFrontend(args.ckpt_dir, args.sock, args.target, prefix_key=prefix, cmd_key=cmd_key)
+    fe = PTYFrontend(
+        args.ckpt_dir, args.sock, args.target,
+        prefix_key=prefix, cmd_key=cmd_key,
+        enable_lazy_pages=bool(args.lazy_pages),
+        enable_track_mem=bool(args.track_mem),
+        prev_images_dir=(args.prev_images_dir or None),
+    )
     rc = fe.run()
     return rc
 

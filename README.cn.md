@@ -244,3 +244,39 @@ python3 tools/xspdb_pty_supervisor.py \
 
 - TUI 内 `xckpt_restore/xckpt_rollback` 已禁用；建议统一在命令模式中执行保存/恢复。
 - 需要系统安装并正确配置 CRIU（以及必要的权限/内核特性）。
+
+#### 保存/恢复 Hook（可选）
+
+通过入口 `tools/xspdb_entry.py` 的 JSON 配置，您可以为保存/恢复配置 Hook：
+
+- `manifest_include`：需要随检查点快照的外部文件（支持 glob），例如波形与覆盖率产物。
+- `pre_save_backend_cmds`：保存前在后端注入的命令（例如 `xwave_flush`）。命令模式下会临时恢复后端注入命令，随后立即暂停（无额外等待逻辑，完成判定由用户的 Python Hook 自行处理）。
+
+支持 Python 函数 Hook：在 `python_hooks` 中以 `module:function` 或 `/path/file.py:function` 指定：
+
+```
+"python_hooks": {
+  "pre_save": "myhooks:pre_save",        
+  "post_save": "myhooks:post_save",
+  "pre_restore": "myhooks:pre_restore",
+  "post_restore": "myhooks:post_restore"
+}
+```
+
+Hook 函数签名：`def pre_save(frontend): ...`
+
+可用辅助方法（在 `frontend` 上）：
+- `hook_inject_backend_cmds(["xwave_flush"])`：向后端注入命令（无内置等待策略，请在 Hook 内自行判断完成或超时）
+- `hook_child_pid()`：获取当前后端 PID
+
+示例配置见 `example/xspdb.json`。
+
+#### CRIU 加速选项（可选）
+
+可在配置中启用以下 CRIU 选项以加速 dump/restore（需要内核/权限支持，具体兼容性以系统为准）：
+
+- `criu.lazy_pages`：在恢复时加入 `--lazy-pages`，按需调页。
+- `criu.track_mem`：在保存时加入 `--track-mem`，跟踪内存变化以优化镜像。
+- `criu.prev_images_dir`：为 dump/restore 传入 `--prev-images-dir <PATH>` 以复用之前的镜像数据。
+
+也可直接通过监督器脚本 CLI 开启：`--lazy-pages`、`--track-mem`、`--prev-images-dir PATH`。

@@ -20,6 +20,9 @@ Config (JSON) example (xspdb.json):
   "prefix_key": "^A",
   "cmd_key": "c",
   "target": ["python3", "emu.py"]
+  ,"manifest_include": ["waves/*.fst", "waves/*.vcd", ".coverage", "coverage.xml", "cov/**/*.info", "build/**/*.gcda", "build/**/*.gcno"],
+  "pre_save_backend_cmds": ["xwave_flush"],
+  "criu": { "lazy_pages": false, "track_mem": false, "prev_images_dir": "" }
 }
 """
 
@@ -27,6 +30,8 @@ import argparse
 import json
 import os
 import sys
+import importlib
+import importlib.util
 
 
 def decode_ctrl(s):
@@ -70,19 +75,78 @@ def main():
     prefix = decode_ctrl(args.prefix_key or cfg.get('prefix_key', '^A'))
     cmd_key = (args.cmd_key or cfg.get('cmd_key', 'c'))
     target = args.target or cfg.get('target', [])
+    manifest_include = cfg.get('manifest_include', [])
+    pre_save_backend_cmds = cfg.get('pre_save_backend_cmds', [])
+    pre_restore_backend_cmds = cfg.get('pre_restore_backend_cmds', [])
+    criu_cfg = cfg.get('criu', {}) if isinstance(cfg.get('criu', {}), dict) else {}
+    enable_lazy_pages = bool(cfg.get('lazy_pages', criu_cfg.get('lazy_pages', False)))
+    enable_track_mem = bool(cfg.get('track_mem', criu_cfg.get('track_mem', False)))
+    prev_images_dir = cfg.get('prev_images_dir', criu_cfg.get('prev_images_dir', '')) or None
+    pyhooks = cfg.get('python_hooks', {}) if isinstance(cfg.get('python_hooks', {}), dict) else {}
+    pre_save_py = pyhooks.get('pre_save')
+    post_save_py = pyhooks.get('post_save')
+    pre_restore_py = pyhooks.get('pre_restore')
+    post_restore_py = pyhooks.get('post_restore')
+
+    def _load_callable(spec):
+        if not spec:
+            return None
+        # spec could be 'module:func' or '/path/to/file.py:func'
+        if ':' not in spec:
+            return None
+        mod, fn = spec.split(':', 1)
+        try:
+            if mod.endswith('.py') and os.path.isfile(mod):
+                name = os.path.splitext(os.path.basename(mod))[0]
+                specm = importlib.util.spec_from_file_location(name, mod)
+                module = importlib.util.module_from_spec(specm)
+                assert specm and specm.loader
+                specm.loader.exec_module(module)  # type: ignore
+            else:
+                module = importlib.import_module(mod)
+            cb = getattr(module, fn, None)
+            return cb if callable(cb) else None
+        except Exception:
+            return None
+
+    pre_save_cb = _load_callable(pre_save_py)
+    post_save_cb = _load_callable(post_save_py)
+    pre_restore_cb = _load_callable(pre_restore_py)
+    post_restore_cb = _load_callable(post_restore_py)
 
     if not target:
         print('No target specified. Provide in config or after --', file=sys.stderr)
         return 2
 
+    # Ensure ckpt dir and manifest
+    os.makedirs(ckpt_dir, exist_ok=True)
+    manifest_path = os.path.join(ckpt_dir, 'manifest.json')
+    if isinstance(manifest_include, list) and manifest_include:
+        try:
+            with open(manifest_path, 'w') as f:
+                json.dump({"include": manifest_include}, f, indent=2)
+        except Exception:
+            pass
+
     # Lazy import to avoid circulars
     from tools.xspdb_pty_supervisor import PTYFrontend
 
-    fe = PTYFrontend(ckpt_dir, sock, target, prefix_key=prefix, cmd_key=cmd_key.encode()[:1] or b'c')
-    os.makedirs(ckpt_dir, exist_ok=True)
+    fe = PTYFrontend(
+        ckpt_dir, sock, target,
+        prefix_key=prefix,
+        cmd_key=cmd_key.encode()[:1] or b'c',
+        pre_save_backend_cmds=pre_save_backend_cmds,
+        pre_restore_backend_cmds=pre_restore_backend_cmds,
+        enable_lazy_pages=enable_lazy_pages,
+        enable_track_mem=enable_track_mem,
+        prev_images_dir=prev_images_dir,
+        pre_save_py=pre_save_cb,
+        post_save_py=post_save_cb,
+        pre_restore_py=pre_restore_cb,
+        post_restore_py=post_restore_cb,
+    )
     return fe.run()
 
 
 if __name__ == '__main__':
     raise SystemExit(main())
-

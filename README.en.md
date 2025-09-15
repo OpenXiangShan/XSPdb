@@ -240,3 +240,39 @@ python3 tools/xspdb_pty_supervisor.py \
 
 - Inside TUI, `xckpt_restore/xckpt_rollback` are disabled and will point you to the supervisor’s command mode.
 - Requires CRIU with proper kernel/capability settings. Command mode pauses the backend (SIGSTOP) and output proxy during save/restore.
+
+#### Save/Restore Hooks (optional)
+
+Using the `tools/xspdb_entry.py` JSON config, you can define hooks:
+
+- `manifest_include`: external files to snapshot with each checkpoint (glob), e.g., waveform and coverage artifacts.
+- `pre_save_backend_cmds`: commands to inject into the backend before saving (e.g., `xwave_flush`). In command mode we briefly resume, inject, then immediately pause again. No built-in waiting; completion/timeout should be handled in your Python hook.
+
+Python hook support: define in `python_hooks` using `module:function` or `/path/file.py:function`:
+
+```
+"python_hooks": {
+  "pre_save": "myhooks:pre_save",
+  "post_save": "myhooks:post_save",
+  "pre_restore": "myhooks:pre_restore",
+  "post_restore": "myhooks:post_restore"
+}
+```
+
+Hook signature: `def pre_save(frontend): ...`
+
+Helper methods available on `frontend`:
+- `hook_inject_backend_cmds(["xwave_flush"])`: inject backend commands (no built-in waiting; manage completion yourself)
+- `hook_child_pid()`: get current backend PID
+
+See `example/xspdb.json` for a complete example.
+
+#### CRIU acceleration flags (optional)
+
+You can enable additional CRIU options to speed up dump/restore (subject to kernel/capability support):
+
+- `criu.lazy_pages`: adds `--lazy-pages` on restore (on-demand paging).
+- `criu.track_mem`: adds `--track-mem` on dump (memory change tracking).
+- `criu.prev_images_dir`: passes `--prev-images-dir <PATH>` to dump/restore for reusing previous images.
+
+You can also enable these via the supervisor CLI: `--lazy-pages`, `--track-mem`, `--prev-images-dir PATH`.

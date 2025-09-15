@@ -1,0 +1,28 @@
+{
+  "ckpt_dir": ".xspdb_ckpt",
+  "sock": ".xspdb_ckpt/sock",
+  "prefix_key": "^A",
+  "cmd_key": "c",
+  "target": ["python3", "emu.py"],
+  "manifest_include": [
+    "waves/*.fst",
+    "waves/*.vcd",
+    ".coverage",
+    "coverage.xml",
+    "cov/**/*.info",
+    "build/**/*.gcda",
+    "build/**/*.gcno"
+  ],
+  "pre_save_backend_cmds": ["xwave_flush"],
+  "python_hooks": {
+    "pre_save": "",          
+    "post_save": "",         
+    "pre_restore": "",       
+    "post_restore": ""       
+  },
+  "criu": {
+    "lazy_pages": false,
+    "track_mem": false,
+    "prev_images_dir": ""
+  }
+}

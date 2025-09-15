@@ -23,10 +23,10 @@ import json
 import shutil
 import socket
 import glob
-import hashlib
 import subprocess
 
 from XSPdb.cmd.util import info, warn, error, message
+from XSPdb.cmd.ckpt_utils import load_manifest, save_manifest, rel_target, copy_in, write_files_index, restore_files
 
 
 class CmdCkpt:
@@ -240,21 +240,10 @@ class CmdCkpt:
 
     # ---------- file versioning helpers ----------
     def api_ckpt_load_manifest(self):
-        data = {"include": []}
-        try:
-            if os.path.exists(self._ckpt_manifest):
-                with open(self._ckpt_manifest, "r") as f:
-                    j = json.load(f)
-                    if isinstance(j, dict):
-                        data.update(j)
-        except Exception:
-            pass
-        return data
+        return load_manifest(self._ckpt_manifest)
 
     def api_ckpt_save_manifest(self, data):
-        os.makedirs(os.path.dirname(self._ckpt_manifest), exist_ok=True)
-        with open(self._ckpt_manifest, "w") as f:
-            json.dump(data, f, indent=2)
+        save_manifest(self._ckpt_manifest, data)
 
     def api_ckpt_collect_files(self):
         mf = self.api_ckpt_load_manifest()
@@ -272,71 +261,16 @@ class CmdCkpt:
         return sorted(list(files))
 
     def api_ckpt_rel_target(self, path):
-        ap = os.path.abspath(path)
-        try:
-            rel = os.path.relpath(ap, self._ckpt_base)
-            if rel.startswith(".."):  # outside base
-                return os.path.join("abs", ap.lstrip(os.sep))
-            return rel
-        except Exception:
-            return os.path.join("abs", ap.lstrip(os.sep))
+        return rel_target(path, self._ckpt_base)
 
     def api_ckpt_copy_in(self, files, files_dir):
-        for src in files:
-            rel = self.api_ckpt_rel_target(src)
-            dst = os.path.join(files_dir, rel)
-            os.makedirs(os.path.dirname(dst), exist_ok=True)
-            try:
-                shutil.copy2(src, dst)
-            except Exception as e:
-                warn(f"copy in fail: {src}: {e}")
-
-    def api_sha256(self, path):
-        try:
-            h = hashlib.sha256()
-            with open(path, 'rb') as f:
-                for chunk in iter(lambda: f.read(8192), b''):
-                    h.update(chunk)
-            return h.hexdigest()
-        except Exception:
-            return None
+        copy_in(files, files_dir, self._ckpt_base)
 
     def api_ckpt_write_files_index(self, files, files_dir):
-        index = []
-        for src in files:
-            rel = self.api_ckpt_rel_target(src)
-            dst = os.path.join(files_dir, rel)
-            index.append({
-                "src": os.path.abspath(src),
-                "rel": rel,
-                "sha256": self.api_sha256(dst),
-            })
-        try:
-            with open(os.path.join(files_dir, "files_index.json"), "w") as f:
-                json.dump(index, f, indent=2)
-        except Exception:
-            pass
+        write_files_index(files, files_dir, self._ckpt_base)
 
     def api_ckpt_restore_files(self, files_dir):
-        index_path = os.path.join(files_dir, "files_index.json")
-        try:
-            with open(index_path, "r") as f:
-                index = json.load(f)
-        except Exception:
-            index = []
-        restored = 0
-        for ent in index:
-            rel = ent.get("rel")
-            src = os.path.join(files_dir, rel)
-            dst = ent.get("src")
-            if not (rel and dst and os.path.isfile(src)):
-                continue
-            os.makedirs(os.path.dirname(dst), exist_ok=True)
-            try:
-                shutil.copy2(src, dst)
-                restored += 1
-            except Exception as e:
-                warn(f"restore file fail: {dst}: {e}")
+        restored = restore_files(files_dir)
         info(f"Restored {restored} files from checkpoint")
 
     # ---------- manifest CLI ----------
