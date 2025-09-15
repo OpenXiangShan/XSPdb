@@ -79,6 +79,12 @@ class XSPdb(pdb.Pdb):
         self.sigint_callback = []
         self.log_cmd_prefix = "@cmd{"
         self.log_cmd_suffix = "}"
+        # record original argv for metadata (used by checkpoint helpers)
+        try:
+            import sys as _sys
+            self.__xspdb_exec_argv__ = list(getattr(_sys, 'argv', []))
+        except Exception:
+            self.__xspdb_exec_argv__ = []
 
     def _sigint_handler(self, s, f):
         self.interrupt = True

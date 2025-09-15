@@ -196,3 +196,51 @@ options:
 - `xlist_freg_map` List floating-point register mappings （列出浮点寄存器映射）
 
 可通过`xcmds`列出所有命令，说明和所在module（通过`xapis`列出所有API，说明和所在module）。
+
+### 基于 PTY 的无感回滚（TUI）
+
+为了在 TUI 模式下实现“看起来像原地回滚”，仓库提供了基于 PTY 的监督器前端：
+
+- 前端脚本：`tools/xspdb_pty_supervisor.py`（直接使用）
+- 启动入口：`tools/xspdb_entry.py`（建议使用，支持 JSON 配置文件）
+
+方案原理：前端在 PTY 主端代理 I/O，目标后端在 PTY 从端运行；保存/恢复由前端通过 CRIU 执行。恢复时采取“先停止旧后端，再恢复新后端”的顺序，完全避免双写。为此，TUI 内部的 `xckpt_restore/xckpt_rollback` 已禁用，请使用前端“命令模式”进行恢复。
+
+使用步骤（入口 + 配置文件）：
+
+1) 新建 `xspdb.json`：
+
+```
+{
+  "ckpt_dir": ".xspdb_ckpt",
+  "sock": ".xspdb_ckpt/sock",
+  "prefix_key": "^A",
+  "cmd_key": "c",
+  "target": ["python3", "emu.py"]
+}
+```
+
+2) 启动：
+
+```
+python3 tools/xspdb_entry.py -c xspdb.json
+```
+
+3) 在 TUI 内按下热键进入命令模式：默认是 `Ctrl-A c`（可在配置中改 `prefix_key` 和 `cmd_key`）。出现 `[ckpt] >` 提示后输入命令：
+
+- `list`：列出检查点（latest 会被标注）
+- `save [name]`：保存检查点
+- `restore [name|latest]`：先停止旧后端，再恢复新后端，避免双写
+- `exit`：退出命令模式，继续 TUI
+
+说明与注意：
+- 也可直接使用监督器脚本：
+
+```
+python3 tools/xspdb_pty_supervisor.py \
+  --ckpt-dir .xspdb_ckpt --sock .xspdb_ckpt/sock \
+  --prefix-key ^A --cmd-key c -- python3 emu.py
+```
+
+- TUI 内 `xckpt_restore/xckpt_rollback` 已禁用；建议统一在命令模式中执行保存/恢复。
+- 需要系统安装并正确配置 CRIU（以及必要的权限/内核特性）。

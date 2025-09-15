@@ -192,3 +192,51 @@ options:
 - `xlist_freg_map` List floating-point register mappings
 
 You can use `xcmds` to list all commands, their descriptions, and the modules they belong to (use `xapis` to list all APIs, their descriptions, and their modules).
+
+### PTY-based seamless rollback (TUI)
+
+To emulate “in-place” rollback in TUI, the repo ships a PTY supervisor frontend:
+
+- Frontend script: `tools/xspdb_pty_supervisor.py` (direct use)
+- Entry launcher: `tools/xspdb_entry.py` (recommended; JSON-config driven)
+
+Design: the frontend owns the PTY master to proxy I/O; the backend runs on the PTY slave. CRIU dump/restore is executed by the frontend. Restore follows a strict “stop old first, then restore new” flow to avoid any double-write. Therefore `xckpt_restore/xckpt_rollback` are disabled inside TUI; use the supervisor’s command mode instead.
+
+Steps (entry + config):
+
+1) Create `xspdb.json`:
+
+```
+{
+  "ckpt_dir": ".xspdb_ckpt",
+  "sock": ".xspdb_ckpt/sock",
+  "prefix_key": "^A",
+  "cmd_key": "c",
+  "target": ["python3", "emu.py"]
+}
+```
+
+2) Launch:
+
+```
+python3 tools/xspdb_entry.py -c xspdb.json
+```
+
+3) In TUI press command-mode hotkey (`Ctrl-A c` by default; configurable via `prefix_key` and `cmd_key`). You will see `[ckpt] >` and can type:
+
+- `list`: list checkpoints (latest marked)
+- `save [name]`: save a checkpoint
+- `restore [name|latest]`: stop old backend, then restore new backend (no double-write)
+- `exit`: exit command mode, resume TUI
+
+Notes:
+- You may also call the supervisor directly:
+
+```
+python3 tools/xspdb_pty_supervisor.py \
+  --ckpt-dir .xspdb_ckpt --sock .xspdb_ckpt/sock \
+  --prefix-key ^A --cmd-key c -- python3 emu.py
+```
+
+- Inside TUI, `xckpt_restore/xckpt_rollback` are disabled and will point you to the supervisor’s command mode.
+- Requires CRIU with proper kernel/capability settings. Command mode pauses the backend (SIGSTOP) and output proxy during save/restore.
