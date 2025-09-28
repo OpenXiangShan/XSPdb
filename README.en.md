@@ -193,14 +193,18 @@ options:
 
 You can use `xcmds` to list all commands, their descriptions, and the modules they belong to (use `xapis` to list all APIs, their descriptions, and their modules).
 
-### PTY-based seamless rollback (TUI)
+### Socket-Wrapper based seamless rollback (TUI)
 
-To emulate “in-place” rollback in TUI, the repo ships a PTY supervisor frontend:
+To robustly support “in-place” rollback in TUI, this repo ships a two-process architecture: `supervisor ⇄ socket-wrapper ⇄ target`.
 
-- Frontend script: `tools/xspdb_pty_supervisor.py` (direct use)
-- Entry launcher: `tools/xspdb_entry.py` (recommended; JSON-config driven)
-
-Design: the frontend owns the PTY master to proxy I/O; the backend runs on the PTY slave. CRIU dump/restore is executed by the frontend. Restore follows a strict “stop old first, then restore new” flow to avoid any double-write. Therefore `xckpt_restore/xckpt_rollback` are disabled inside TUI; use the supervisor’s command mode instead.
+- Supervisor (`tools/xspdb_supervisor.py`):
+  - Reads your terminal input and writes output.
+  - Establishes a data channel to the wrapper and proxies I/O to the PTY.
+  - Performs CRIU dump/restore on the entire subtree (wrapper+target), keeping PTY/ctty inside and avoiding cross-env issues.
+  - Exposes `.xspdb_ckpt/api.shm` for XSPdb’s `xckpt_*` commands.
+- Socket-Wrapper (`tools/xspdb_socket_wrapper.py`):
+  - Creates PTY and execs target (XSPdb backend) on the slave side.
+  - Provides data discovery (`.xspdb_ckpt/tty.shm`) and control discovery (`.xspdb_ckpt/cmdapi.shm`) for shared-memory channels.
 
 Steps (entry + config):
 
@@ -209,7 +213,7 @@ Steps (entry + config):
 ```
 {
   "ckpt_dir": ".xspdb_ckpt",
-  "sock": ".xspdb_ckpt/sock",
+  "sock": ".xspdb_ckpt/api.shm",
   "prefix_key": "^A",
   "cmd_key": "c",
   "target": ["python3", "emu.py"]
@@ -222,24 +226,18 @@ Steps (entry + config):
 python3 tools/xspdb_entry.py -c xspdb.json
 ```
 
-3) In TUI press command-mode hotkey (`Ctrl-A c` by default; configurable via `prefix_key` and `cmd_key`). You will see `[ckpt] >` and can type:
+3) Command mode hotkey: press `Ctrl-A c` on your real terminal (configurable via `prefix_key` / `cmd_key`). Once `[ckpt] >` appears, you can type:
 
 - `list`: list checkpoints (latest marked)
-- `save [name]`: save a checkpoint
-- `restore [name|latest]`: stop old backend, then restore new backend (no double-write)
-- `exit`: exit command mode, resume TUI
+- `save [name]`: save a checkpoint (can auto-inject commands like `xwave_flush` before saving)
+- `restore [name|latest]`: restore from the checkpoint (stop old first, then bring up new; no double-write)
+- `help` or `?`: show help, current hotkeys, dirs and sockets
+- `back`: leave command mode (resume TUI)
+- `exit`: shutdown wrapper+target and supervisor (cleanup all background processes)
 
 Notes:
-- You may also call the supervisor directly:
-
-```
-python3 tools/xspdb_pty_supervisor.py \
-  --ckpt-dir .xspdb_ckpt --sock .xspdb_ckpt/sock \
-  --prefix-key ^A --cmd-key c -- python3 emu.py
-```
-
-- Inside TUI, `xckpt_restore/xckpt_rollback` are disabled and will point you to the supervisor’s command mode.
-- Requires CRIU with proper kernel/capability settings. Command mode pauses the backend (SIGSTOP) and output proxy during save/restore.
+- Inside TUI, `xckpt_restore/xckpt_rollback` are disabled; use the supervisor command mode or XSPdb’s `xckpt_save` (which talks to `.xspdb_ckpt/api.shm`).
+- Requires CRIU and proper kernel/capability settings. Command mode pauses the backend (SIGSTOP) and the output proxy during save/restore.
 
 #### Save/Restore Hooks (optional)
 

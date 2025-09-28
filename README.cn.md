@@ -197,14 +197,18 @@ options:
 
 可通过`xcmds`列出所有命令，说明和所在module（通过`xapis`列出所有API，说明和所在module）。
 
-### 基于 PTY 的无感回滚（TUI）
+### 基于 Socket-Wrapper 的无感回滚（TUI）
 
-为了在 TUI 模式下实现“看起来像原地回滚”，仓库提供了基于 PTY 的监督器前端：
+为在 TUI 下实现更稳健的“原地回滚”，本仓库提供“supervisor ⇄ socket-wrapper ⇄ target”的结构：
 
-- 前端脚本：`tools/xspdb_pty_supervisor.py`（直接使用）
-- 启动入口：`tools/xspdb_entry.py`（建议使用，支持 JSON 配置文件）
-
-方案原理：前端在 PTY 主端代理 I/O，目标后端在 PTY 从端运行；保存/恢复由前端通过 CRIU 执行。恢复时采取“先停止旧后端，再恢复新后端”的顺序，完全避免双写。为此，TUI 内部的 `xckpt_restore/xckpt_rollback` 已禁用，请使用前端“命令模式”进行恢复。
+- Supervisor（`tools/xspdb_supervisor.py`）：
+  - 读取你的终端输入、回显输出。
+  - 与 wrapper 建立数据通道，转发 I/O 到 PTY。
+  - 通过 CRIU 对“wrapper+target”整棵子树做保存/恢复（TTY 全在子树内，避免跨环境问题）。
+  - 暴露 `.xspdb_ckpt/api.shm`，供 XSPdb 内的 `xckpt_*` 命令调用。
+- Socket-Wrapper（`tools/xspdb_socket_wrapper.py`）：
+  - 创建 PTY 并在 slave 上 exec target（XSPdb 后端）。
+  - 提供数据发现文件（`.xspdb_ckpt/tty.shm`）与控制发现文件（`.xspdb_ckpt/cmdapi.shm`），描述共享内存通道信息。
 
 使用步骤（入口 + 配置文件）：
 
@@ -213,7 +217,7 @@ options:
 ```
 {
   "ckpt_dir": ".xspdb_ckpt",
-  "sock": ".xspdb_ckpt/sock",
+  "sock": ".xspdb_ckpt/api.shm",
   "prefix_key": "^A",
   "cmd_key": "c",
   "target": ["python3", "emu.py"]
@@ -226,23 +230,17 @@ options:
 python3 tools/xspdb_entry.py -c xspdb.json
 ```
 
-3) 在 TUI 内按下热键进入命令模式：默认是 `Ctrl-A c`（可在配置中改 `prefix_key` 和 `cmd_key`）。出现 `[ckpt] >` 提示后输入命令：
+3) 命令模式与热键：在真实终端按 `Ctrl-A c`（可通过 `prefix_key` / `cmd_key` 配置）。看到 `[ckpt] >` 后可输入：
 
-- `list`：列出检查点（latest 会被标注）
-- `save [name]`：保存检查点
-- `restore [name|latest]`：先停止旧后端，再恢复新后端，避免双写
-- `exit`：退出命令模式，继续 TUI
+- `list`：列出检查点（最新项会标注 latest）
+- `save [name]`：保存检查点（保存前可自动注入命令，如 xwave_flush）
+- `restore [name|latest]`：从检查点恢复（先停旧、再启新，避免双写）
+- `help` 或 `?`：显示帮助、当前热键、目录与 socket
+- `back`：仅退出命令模式，恢复后端 I/O
+- `exit`：退出并清理所有后台进程（终止 wrapper+target 与 supervisor）
 
 说明与注意：
-- 也可直接使用监督器脚本：
-
-```
-python3 tools/xspdb_pty_supervisor.py \
-  --ckpt-dir .xspdb_ckpt --sock .xspdb_ckpt/sock \
-  --prefix-key ^A --cmd-key c -- python3 emu.py
-```
-
-- TUI 内 `xckpt_restore/xckpt_rollback` 已禁用；建议统一在命令模式中执行保存/恢复。
+- TUI 内 `xckpt_restore/xckpt_rollback` 已禁用；请使用命令模式或 XSPdb 的 `xckpt_save` 等走 supervisor。
 - 需要系统安装并正确配置 CRIU（以及必要的权限/内核特性）。
 
 #### 保存/恢复 Hook（可选）

@@ -16,13 +16,14 @@ CLI flags override config values.
 Config (JSON) example (xspdb.json):
 {
   "ckpt_dir": ".xspdb_ckpt",
-  "sock": ".xspdb_ckpt/sock",
+  "sock": ".xspdb_ckpt/api.shm",
   "prefix_key": "^A",
   "cmd_key": "c",
   "target": ["python3", "emu.py"]
   ,"manifest_include": ["waves/*.fst", "waves/*.vcd", ".coverage", "coverage.xml", "cov/**/*.info", "build/**/*.gcda", "build/**/*.gcno"],
   "pre_save_backend_cmds": ["xwave_flush"],
-  "criu": { "lazy_pages": false, "track_mem": false, "prev_images_dir": "" }
+  "criu": { "lazy_pages": false, "track_mem": false, "prev_images_dir": "" },
+  "env": { "MY_FLAG": "1", "UNSET_THIS": null }
 }
 """
 
@@ -31,6 +32,7 @@ import json
 import os
 import sys
 import importlib
+import asyncio
 import importlib.util
 
 
@@ -71,7 +73,7 @@ def main():
     cfg = load_config(args.config)
 
     ckpt_dir = args.ckpt_dir or cfg.get('ckpt_dir', '.xspdb_ckpt')
-    sock = args.sock or cfg.get('sock', '.xspdb_ckpt/sock')
+    sock = args.sock or cfg.get('sock', '.xspdb_ckpt/api.shm')
     prefix = decode_ctrl(args.prefix_key or cfg.get('prefix_key', '^A'))
     cmd_key = (args.cmd_key or cfg.get('cmd_key', 'c'))
     target = args.target or cfg.get('target', [])
@@ -87,6 +89,7 @@ def main():
     post_save_py = pyhooks.get('post_save')
     pre_restore_py = pyhooks.get('pre_restore')
     post_restore_py = pyhooks.get('post_restore')
+    env_cfg = cfg.get('env', {}) if isinstance(cfg.get('env', {}), dict) else {}
 
     def _load_callable(spec):
         if not spec:
@@ -128,24 +131,24 @@ def main():
         except Exception:
             pass
 
-    # Lazy import to avoid circulars
-    from tools.xspdb_pty_supervisor import PTYFrontend
 
-    fe = PTYFrontend(
+    # 新架构：使用 Socket-Wrapper supervisor
+    from tools.xspdb_supervisor import WrapperSupervisor
+
+    sup = WrapperSupervisor(
         ckpt_dir, sock, target,
-        prefix_key=prefix,
-        cmd_key=cmd_key.encode()[:1] or b'c',
-        pre_save_backend_cmds=pre_save_backend_cmds,
-        pre_restore_backend_cmds=pre_restore_backend_cmds,
+        wrap_sock=os.path.join(ckpt_dir, 'cmdapi.shm'),
         enable_lazy_pages=enable_lazy_pages,
         enable_track_mem=enable_track_mem,
         prev_images_dir=prev_images_dir,
-        pre_save_py=pre_save_cb,
-        post_save_py=post_save_cb,
-        pre_restore_py=pre_restore_cb,
-        post_restore_py=post_restore_cb,
+        pre_save_backend_cmds=pre_save_backend_cmds,
+        pre_restore_backend_cmds=pre_restore_backend_cmds,
+        data_sock=os.path.join(ckpt_dir, 'tty.shm'),
+        prefix=prefix,
+        cmd_key=(cmd_key[:1] if isinstance(cmd_key, str) else 'c'),
+        env_overrides=env_cfg,
     )
-    return fe.run()
+    return asyncio.run(sup.run())
 
 
 if __name__ == '__main__':

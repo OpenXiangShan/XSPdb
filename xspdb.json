@@ -1,0 +1,45 @@
+{
+  "ckpt_dir": ".xspdb_ckpt",
+  "sock": ".xspdb_ckpt/api.shm",
+
+  "prefix_key": "^A",
+  "cmd_key": "c",
+
+  "target": [
+    "python3",
+    "example/test.py"
+  ],
+
+  "manifest_include": [
+    "waves/*.fst",
+    "waves/*.vcd",
+    ".coverage",
+    "coverage.xml",
+    "cov/**/*.info",
+    "build/**/*.gcda",
+    "build/**/*.gcno"
+  ],
+
+  "pre_save_backend_cmds": [
+  ],
+  "pre_restore_backend_cmds": [
+  ],
+
+  "criu": {
+    "lazy_pages": false,
+    "track_mem": false,
+    "prev_images_dir": ""
+  },
+
+  "python_hooks": {
+    "pre_save": "",
+    "post_save": "",
+    "pre_restore": "",
+    "post_restore": ""
+  },
+
+  "env": {
+    "PYTHONPATH": ".",
+    "UNSET_THIS": null
+  }
+}

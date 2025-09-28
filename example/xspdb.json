@@ -1,6 +1,6 @@
 {
   "ckpt_dir": ".xspdb_ckpt",
-  "sock": ".xspdb_ckpt/sock",
+  "sock": ".xspdb_ckpt/api.shm",
   "prefix_key": "^A",
   "cmd_key": "c",
   "target": ["python3", "emu.py"],
