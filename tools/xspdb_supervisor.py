@@ -344,9 +344,22 @@ class TtyProxy:
             pass
 
     async def _handle_input(self, data: bytes):
+        # Detect double Ctrl-C (0x03) within window to terminate all
         for b in data:
             ch = chr(b)
             if not self._cmd_mode:
+                # Double Ctrl-C handling in raw mode (first goes to target, second exits all)
+                if b == 0x03:  # ETX / Ctrl-C
+                    now = time.time()
+                    last = getattr(self, '_last_ctrl_c_ts', None)
+                    setattr(self, '_last_ctrl_c_ts', now)
+                    if last is not None and (now - last) < 1.0:
+                        try:
+                            self.sup._log('tty: Ctrl-C x2 detected; shutting down')
+                        except Exception:
+                            pass
+                        await self.sup.shutdown()
+                        return
                 if self._prefix_pending:
                     self._prefix_pending = False
                     if ch == self._cmd_key:
@@ -587,6 +600,8 @@ class WrapperSupervisor:
         self._log_path = os.path.join(self.ckpt_dir, (self.log_cfg.supervisor or 'supervisor.log'))
         self._precreated_shms: list[shared_memory.SharedMemory] = []
         self._sigchld_installed: bool = False
+        # Ctrl-C handling (double press to exit all)
+        self._last_sigint_ts: float | None = None
 
     # ---- discovery helpers ----
     def _cmd_names(self) -> tuple[str, str, int]:
@@ -1282,6 +1297,17 @@ class WrapperSupervisor:
         os.makedirs(self.ckpt_dir, exist_ok=True)
         # Install child reaper to avoid zombies from restored wrapper
         self._install_sigchld_reaper()
+        # Install SIGINT handler (works when not in raw TTY mode)
+        try:
+            loop = asyncio.get_running_loop()
+            def _on_sigint():
+                try:
+                    asyncio.create_task(self._handle_sigint())
+                except Exception:
+                    pass
+            loop.add_signal_handler(signal.SIGINT, _on_sigint)
+        except Exception:
+            pass
         # Spawn wrapper
         if not self.target:
             print('No target provided to supervisor', file=sys.stderr)
@@ -1309,6 +1335,18 @@ class WrapperSupervisor:
         # Start TTY proxy (wait for wrapper to create discovery file)
         self._tty = TtyProxy(self)
         await self._tty.start()
+        # Watch wrapper exit to shutdown supervisor automatically
+        async def _watch_wrapper_exit():
+            try:
+                while not self._stop.is_set() and self.wrapper_proc is not None:
+                    if self.wrapper_proc.poll() is not None:
+                        self._log(f'wrapper exited rc={self.wrapper_proc.returncode}')
+                        self._stop.set()
+                        break
+                    await asyncio.sleep(0.05)
+            except Exception:
+                pass
+        asyncio.create_task(_watch_wrapper_exit())
         try:
             await self._stop.wait()
         finally:
@@ -1322,6 +1360,25 @@ class WrapperSupervisor:
                 except Exception:
                     pass
         return 0
+
+    async def _handle_sigint(self):
+        now = time.time()
+        if self._last_sigint_ts is not None and (now - self._last_sigint_ts) < 1.0:
+            # Double Ctrl-C: exit everything
+            try:
+                self._log('SIGINT x2: shutdown all')
+            except Exception:
+                pass
+            try:
+                await self.shutdown()
+            except Exception:
+                self._stop.set()
+        else:
+            self._last_sigint_ts = now
+            try:
+                self._log('SIGINT: press again within 1s to exit all')
+            except Exception:
+                pass
 
 
 async def _run_cmd(cmd, env=None, cwd=None) -> int:

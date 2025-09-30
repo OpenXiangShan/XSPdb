@@ -623,6 +623,7 @@ class WrapperState:
         self._pty_master: int | None = None
         self._pty_slave: int | None = None
         self._sig_handlers_installed = False
+        self._watch_task: asyncio.Task | None = None
 
     async def set_winsize_async(self, rows, cols):
         self._elog(self._log_cmd, f"set_winsize rows={rows} cols={cols}")
@@ -778,6 +779,25 @@ class WrapperState:
         self._install_signal_handlers()
         await self.cmd_server.start()
         await self.tty_server.start()
+        # Watch child; if it exits, trigger shutdown
+        async def _watch_child():
+            try:
+                while not self._shutdown.is_set():
+                    pid = self._child_pid
+                    if pid:
+                        try:
+                            os.kill(pid, 0)
+                        except ProcessLookupError:
+                            self._elog(self._log_cmd, 'child exited; wrapper shutting down')
+                            try:
+                                self._shutdown.set()
+                            except Exception:
+                                pass
+                            break
+                    await asyncio.sleep(0.05)
+            except Exception:
+                pass
+        self._watch_task = asyncio.create_task(_watch_child())
         # Wait for shutdown
         await self._shutdown.wait()
         # Cleanup

@@ -45,7 +45,10 @@ class XSPdb(pdb.Pdb):
         self.flash_base = flash_base
         self.flash_ends = flash_base + default_flash_size
         self.no_interact = no_interact
+        # Prepare SIGINT handling early to avoid race during init
         self.interrupt_count = 0
+        self.sigint_original_handler = signal.getsignal(signal.SIGINT)
+        self.sigint_callback = []
         signal.signal(signal.SIGINT, self._sigint_handler)
         if no_interact:
             info("Start XSPdb whit no_interact config, press Ctrl+C will interrupt the program")
@@ -75,8 +78,6 @@ class XSPdb(pdb.Pdb):
         self.load_cmds()
         self.api_init_waveform()
         self.init_cmds = []
-        self.sigint_original_handler = signal.getsignal(signal.SIGINT)
-        self.sigint_callback = []
         self.log_cmd_prefix = "@cmd{"
         self.log_cmd_suffix = "}"
         # record original argv for metadata (used by checkpoint helpers)
@@ -89,9 +90,12 @@ class XSPdb(pdb.Pdb):
     def _sigint_handler(self, s, f):
         self.interrupt = True
         warn("[Ctrl+C] Interrupted")
-        for f in self.sigint_callback:
-            f(self)
-        if self.no_interact:
+        for f in list(getattr(self, 'sigint_callback', []) or []):
+            try:
+                f(self)
+            except Exception:
+                pass
+        if getattr(self, 'no_interact', False):
             warn("No interact mode, exit(-1)")
             raise sys.exit(-1)
         self.interrupt_count += 1
@@ -102,8 +106,12 @@ class XSPdb(pdb.Pdb):
 
     def __del__(self):
         """Destructor"""
-        if self.sigint_original_handler:
-            signal.signal(signal.SIGINT, self.sigint_original_handler)
+        try:
+            h = getattr(self, 'sigint_original_handler', None)
+            if h:
+                signal.signal(signal.SIGINT, h)
+        except Exception:
+            pass
 
     def is_no_interact(self):
         """Check if no interact mode"""
