@@ -21,6 +21,8 @@ import termios
 import pty
 import signal
 import subprocess
+import traceback
+import time
 
 
 _HDR_SIZE = 16  # 8 bytes head, 8 bytes tail
@@ -234,6 +236,22 @@ class CmdApiServer:
         self.req_q: SharedMsgQueue | None = None
         self.resp_q: SharedMsgQueue | None = None
         self._task: asyncio.Task | None = None
+        self._sig_handlers_installed: bool = False
+        # path for SIGCONT recovery log
+        try:
+            base = getattr(state, 'ckpt_dir', os.path.dirname(self.sock_path))
+        except Exception:
+            base = os.path.dirname(self.sock_path)
+        self._sig_log = os.path.join(base, 'wrapper.sigcont.log')
+
+    def _elog_sigcont(self, msg: str) -> None:
+        try:
+            os.makedirs(os.path.dirname(self._sig_log), exist_ok=True)
+            ts = time.strftime('%Y-%m-%d %H:%M:%S')
+            with open(self._sig_log, 'a') as f:
+                f.write(f"[{ts}] {msg}\n")
+        except Exception:
+            pass
 
     @staticmethod
     def _derive_id(key: str) -> str:
@@ -261,6 +279,30 @@ class CmdApiServer:
                 }, f)
         except Exception:
             pass
+        # Install SIGCONT callback to reconnect queues after CRIU restore
+        if not self._sig_handlers_installed:
+            try:
+                loop = asyncio.get_running_loop()
+                self._elog_sigcont('installing signal handlers for SIGCONT/SIGUSR1')
+                loop.add_signal_handler(signal.SIGCONT, lambda: asyncio.create_task(self._on_sigcont()))
+                self._sig_handlers_installed = True
+                # Optional: also allow SIGUSR1 to trigger reconnect in dev
+                try:
+                    loop.add_signal_handler(signal.SIGUSR1, lambda: asyncio.create_task(self._on_sigcont()))
+                except Exception:
+                    pass
+            except (NotImplementedError, RuntimeError):
+                # Fallback using signal.signal
+                def _h(signum, frame):
+                    try:
+                        asyncio.get_event_loop().create_task(self._on_sigcont())
+                    except Exception:
+                        pass
+                try:
+                    self._elog_sigcont('fallback install SIGCONT via signal.signal')
+                    signal.signal(signal.SIGCONT, _h)
+                except Exception:
+                    pass
         # Start serving loop
         self._task = asyncio.create_task(self._serve_loop())
 
@@ -297,6 +339,91 @@ class CmdApiServer:
             args = req.get('args') if isinstance(req, dict) else {}
             res = await self._dispatch(cmd, args)
             await self._respond(res)
+
+    async def _on_sigcont(self):
+        # Reconnect SharedMsgQueue channels when receiving SIGCONT
+        try:
+            self._elog_sigcont('SIGCONT received: begin reconnect cmdapi shm')
+            if getattr(self.state, '_elog', None):
+                try:
+                    self.state._elog(os.path.join(getattr(self.state, 'ckpt_dir', '.'), 'wrapper.cmd.log'), 'sigcont: reconnect cmdapi shm')
+                except Exception:
+                    pass
+            await self._reconnect_shm()
+        except Exception as ex:
+            self._elog_sigcont('SIGCONT reconnect error: ' + str(ex))
+            try:
+                if getattr(self.state, '_elog', None):
+                    self.state._elog(os.path.join(getattr(self.state, 'ckpt_dir', '.'), 'wrapper.cmd.log'), 'sigcont: reconnect failed: ' + str(ex) + '\n' + traceback.format_exc())
+            except Exception:
+                pass
+
+    async def _reconnect_shm(self):
+        # Stop current serve loop to safely swap queue instances
+        t = self._task
+        self._task = None
+        if t is not None:
+            t.cancel()
+            try:
+                await t
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                pass
+        # Close old queues without unlinking
+        old_req, old_resp = self.req_q, self.resp_q
+        self.req_q = None
+        self.resp_q = None
+        try:
+            self._elog_sigcont('serve loop cancelled; closing old queues')
+        except Exception:
+            pass
+        try:
+            if old_req:
+                old_req.close()
+        except Exception:
+            pass
+        try:
+            if old_resp:
+                old_resp.close()
+        except Exception:
+            pass
+        # Re-open existing segments first; fall back to create if missing
+        req_name = self._req_name()
+        resp_name = self._resp_name()
+        try:
+            self._elog_sigcont(f'open shm names: req={req_name} resp={resp_name} size={self.size}')
+        except Exception:
+            pass
+        try:
+            self.req_q = SharedMsgQueue(req_name, size=self.size, create=False)
+            try: self._elog_sigcont('opened existing req queue');
+            except Exception: pass
+        except Exception as ex:
+            try: self._elog_sigcont('open existing req failed; creating: ' + str(ex))
+            except Exception: pass
+            self.req_q = SharedMsgQueue(req_name, size=self.size, create=True)
+        try:
+            self.resp_q = SharedMsgQueue(resp_name, size=self.size, create=False)
+            try: self._elog_sigcont('opened existing resp queue');
+            except Exception: pass
+        except Exception as ex:
+            try: self._elog_sigcont('open existing resp failed; creating: ' + str(ex))
+            except Exception: pass
+            self.resp_q = SharedMsgQueue(resp_name, size=self.size, create=True)
+        # Refresh discovery file
+        try:
+            with open(self.sock_path, 'w') as f:
+                json.dump({'type': 'shm', 'req': req_name, 'resp': resp_name, 'size': self.size}, f)
+            try: self._elog_sigcont('discovery file refreshed');
+            except Exception: pass
+        except Exception as ex:
+            try: self._elog_sigcont('refresh discovery failed: ' + str(ex))
+            except Exception: pass
+        # Restart serve loop
+        try: self._elog_sigcont('restarting serve loop')
+        except Exception: pass
+        self._task = asyncio.create_task(self._serve_loop())
 
     async def _respond(self, obj: dict):
         assert self.resp_q
@@ -335,6 +462,8 @@ class CmdApiServer:
             if cmd == 'stop_target':
                 ok = S.stop_target()
                 return {"ok": bool(ok)}
+            if cmd == 'reopen_tty':
+                ok = await S.reopen_tty(); return {"ok": bool(ok)}
             if cmd == 'shutdown':
                 # Signal shutdown and ack
                 await S.shutdown()
@@ -369,6 +498,7 @@ class TtyForwardServer:
         self._task_out: asyncio.Task | None = None
         self._loop_reader_installed: bool = False
         self._paused: bool = False
+        self._sig_handlers_installed: bool = False
         # debug logs
         ckpt = getattr(state, 'ckpt_dir', os.path.dirname(self.sock_path)) if state is not None else os.path.dirname(self.sock_path)
         self._log_in = os.path.join(ckpt, 'wrapper.tty.stdin.log')
@@ -398,6 +528,26 @@ class TtyForwardServer:
                 }, f)
         except Exception:
             pass
+        # Install SIGCONT callback to reconnect TTY queues after CRIU restore
+        if not self._sig_handlers_installed:
+            try:
+                loop = asyncio.get_running_loop()
+                loop.add_signal_handler(signal.SIGCONT, lambda: asyncio.create_task(self._on_sigcont()))
+                self._sig_handlers_installed = True
+                try:
+                    loop.add_signal_handler(signal.SIGUSR1, lambda: asyncio.create_task(self._on_sigcont()))
+                except Exception:
+                    pass
+            except (NotImplementedError, RuntimeError):
+                def _h(signum, frame):
+                    try:
+                        asyncio.get_event_loop().create_task(self._on_sigcont())
+                    except Exception:
+                        pass
+                try:
+                    signal.signal(signal.SIGCONT, _h)
+                except Exception:
+                    pass
         # Consume input from client in background
         self._task_in = asyncio.create_task(self._consume_input_loop())
         # Produce output from PTY master to client
@@ -411,7 +561,111 @@ class TtyForwardServer:
             try:
                 loop.add_reader(self.master_fd, self._on_master_readable)
                 self._loop_reader_installed = True
-            except (NotImplementedError, PermissionError):
+                try:
+                    if self.state and getattr(self.state, '_elog', None):
+                        self.state._elog(os.path.join(self.state.ckpt_dir, 'wrapper.tty.log'), 'start: add_reader installed')
+                except Exception:
+                    pass
+            except Exception as ex:
+                # Any failure: fall back to polling loop
+                try:
+                    if self.state and getattr(self.state, '_elog', None):
+                        self.state._elog(os.path.join(self.state.ckpt_dir, 'wrapper.tty.log'), 'start: add_reader failed, fallback loop: ' + str(ex))
+                except Exception:
+                    pass
+                self._task_out = asyncio.create_task(self._produce_output_loop())
+
+    async def _on_sigcont(self):
+        # Recreate TTY shm queues and reinstall hooks
+        try:
+            if self.state and getattr(self.state, '_elog', None):
+                self.state._elog(os.path.join(self.state.ckpt_dir, 'wrapper.tty.log'), 'sigcont: reconnect tty shm')
+        except Exception:
+            pass
+        try:
+            await self._reconnect_tty_shm()
+        except Exception:
+            pass
+
+    async def _reconnect_tty_shm(self):
+        # Cancel tasks
+        if self._task_in:
+            self._task_in.cancel()
+            try:
+                await self._task_in
+            except asyncio.CancelledError:
+                pass
+            self._task_in = None
+        if self._task_out:
+            self._task_out.cancel()
+            try:
+                await self._task_out
+            except asyncio.CancelledError:
+                pass
+            self._task_out = None
+        # Remove reader hook
+        if self._loop_reader_installed and self.master_fd is not None:
+            try:
+                asyncio.get_running_loop().remove_reader(self.master_fd)
+            except Exception:
+                pass
+            self._loop_reader_installed = False
+        # Close queues without unlink
+        try:
+            if self.in_q: self.in_q.close()
+        except Exception:
+            pass
+        try:
+            if self.out_q: self.out_q.close()
+        except Exception:
+            pass
+        self.in_q = None
+        self.out_q = None
+        # Recreate shm queues and rewrite discovery
+        in_name = self._in_name(); out_name = self._out_name()
+        try:
+            if self.state and getattr(self.state, '_elog', None):
+                self.state._elog(os.path.join(self.state.ckpt_dir, 'wrapper.tty.log'), f'reconnect tty shm create in={in_name} out={out_name}')
+        except Exception:
+            pass
+        self.in_q = SharedMsgQueue(in_name, size=self.size, create=True)
+        self.out_q = SharedMsgQueue(out_name, size=self.size, create=True)
+        try:
+            with open(self.sock_path, 'w') as f:
+                json.dump({'type': 'shm', 'in': in_name, 'out': out_name, 'size': self.size}, f)
+        except Exception:
+            pass
+        # Emit a small marker to out queue to verify end-to-end path
+        try:
+            marker = b"\r\n[XSPDB] TTY reconnected\r\n"
+            for _ in range(10):
+                if self.out_q.push(marker):
+                    break
+                await asyncio.sleep(0.01)
+        except Exception:
+            pass
+        # Reinstall reader task/hook
+        self._task_in = asyncio.create_task(self._consume_input_loop())
+        if self.master_fd is not None:
+            try:
+                fcntl.fcntl(self.master_fd, fcntl.F_SETFL, os.O_NONBLOCK)
+            except Exception:
+                pass
+            loop = asyncio.get_running_loop()
+            try:
+                loop.add_reader(self.master_fd, self._on_master_readable)
+                self._loop_reader_installed = True
+                try:
+                    if self.state and getattr(self.state, '_elog', None):
+                        self.state._elog(os.path.join(self.state.ckpt_dir, 'wrapper.tty.log'), 'reconnect: add_reader reinstalled')
+                except Exception:
+                    pass
+            except Exception as ex:
+                try:
+                    if self.state and getattr(self.state, '_elog', None):
+                        self.state._elog(os.path.join(self.state.ckpt_dir, 'wrapper.tty.log'), 'reconnect: add_reader failed, fallback loop: ' + str(ex))
+                except Exception:
+                    pass
                 self._task_out = asyncio.create_task(self._produce_output_loop())
 
     async def stop(self):
@@ -563,6 +817,7 @@ class WrapperState:
         self._child_pid: int | None = None
         self._pty_master: int | None = None
         self._pty_slave: int | None = None
+        self._sig_handlers_installed = False
 
     async def set_winsize_async(self, rows, cols):
         self._elog(self._log_cmd, f"set_winsize rows={rows} cols={cols}")
@@ -631,11 +886,53 @@ class WrapperState:
         # terminate child and cleanup
         try:
             if self._child_pid:
-                os.kill(self._child_pid, signal.SIGTERM)
+                # Try killing the whole process group if child created a new session
+                try:
+                    os.killpg(self._child_pid, signal.SIGTERM)
+                except Exception:
+                    os.kill(self._child_pid, signal.SIGTERM)
         except Exception:
             pass
         self._shutdown.set()
         raise SystemExit(0)
+
+    def _install_signal_handlers(self):
+        if self._sig_handlers_installed:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+            def _on_term():
+                try:
+                    self._elog(self._log_cmd, 'sigterm: received, begin graceful shutdown')
+                except Exception:
+                    pass
+                try:
+                    asyncio.create_task(self.shutdown())
+                except Exception:
+                    # As a fallback, set the event to allow run() to proceed cleanup
+                    try:
+                        self._shutdown.set()
+                    except Exception:
+                        pass
+            try:
+                loop.add_signal_handler(signal.SIGTERM, _on_term)
+            except NotImplementedError:
+                signal.signal(signal.SIGTERM, lambda s, f: _on_term())
+            # Also handle SIGINT for quick stop in dev
+            try:
+                loop.add_signal_handler(signal.SIGINT, _on_term)
+            except Exception:
+                try:
+                    signal.signal(signal.SIGINT, lambda s, f: _on_term())
+                except Exception:
+                    pass
+            self._sig_handlers_installed = True
+            try:
+                self._elog(self._log_cmd, 'signals: SIGTERM/SIGINT handlers installed')
+            except Exception:
+                pass
+        except Exception:
+            pass
 
     # ---- target pid helpers for CRIU coordination ----
     def get_target_pid(self) -> int | None:
@@ -672,6 +969,8 @@ class WrapperState:
         self.tty_server = TtyForwardServer(self.tty_sock, self._pty_master, state=self)
         self._elog(self._log_cmd, f"cmdapi.start {self.cmd_sock}")
         self._elog(self._log_tty, f"tty.start {self.tty_sock}")
+        # Install termination signal handlers for clean shutdown
+        self._install_signal_handlers()
         await self.cmd_server.start()
         await self.tty_server.start()
         # Wait for shutdown
@@ -685,6 +984,35 @@ class WrapperState:
             await self.cmd_server.stop()
         except Exception:
             pass
+        # Ensure child is gone
+        try:
+            if self._child_pid:
+                try:
+                    os.kill(self._child_pid, 0)
+                    # Still alive -> force kill PGID then PID
+                    try:
+                        os.killpg(self._child_pid, signal.SIGKILL)
+                    except Exception:
+                        os.kill(self._child_pid, signal.SIGKILL)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    async def reopen_tty(self):
+        # Stop current TTY server and recreate shm queues and reader hooks
+        try:
+            if self.tty_server:
+                await self.tty_server.stop()
+        except Exception:
+            pass
+        try:
+            self.tty_server = TtyForwardServer(self.tty_sock, self._pty_master, state=self)
+            self._elog(self._log_tty, f"tty.reopen {self.tty_sock}")
+            await self.tty_server.start()
+            return True
+        except Exception:
+            return False
 
     async def _spawn_target_with_pty(self):
         if not self.target:

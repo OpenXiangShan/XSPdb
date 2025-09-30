@@ -21,6 +21,8 @@ import subprocess
 import sys
 import time
 from typing import Optional
+import traceback
+import hashlib
 
 from multiprocessing import shared_memory
 
@@ -111,29 +113,38 @@ class ShmEndpoint:
         self.req: Optional[SharedMsgQueue] = None
         self.resp: Optional[SharedMsgQueue] = None
 
-    def open(self):
+    def open(self, timeout_sec: float = 5.0):
         info = {}
-        # Retry reading discovery file briefly
-        for _ in range(200):
+        deadline = time.time() + max(0.0, float(timeout_sec))
+        last_err = None
+        # Retry reading discovery file until it reports shm type
+        while time.time() < deadline:
             try:
                 with open(self.path, 'r') as f:
                     info = json.load(f)
-                break
-            except Exception:
-                time.sleep(0.01)
-        t = info.get('type')
-        if t != 'shm':
-            raise RuntimeError('discovery file is not shm type: ' + self.path)
+                if info.get('type') == 'shm':
+                    break
+                last_err = f"bad_type={info.get('type')}"
+            except Exception as ex:
+                last_err = str(ex)
+            time.sleep(0.01)
+        if info.get('type') != 'shm':
+            raise RuntimeError('discovery file is not shm type: ' + self.path + (f' ({last_err})' if last_err else ''))
         # Retry opening queues; wrapper may have just created them
-        for _ in range(200):
+        last_err = None
+        while time.time() < deadline:
             try:
                 self.req = SharedMsgQueue(info['req'])
                 self.resp = SharedMsgQueue(info['resp'])
                 break
-            except FileNotFoundError:
+            except FileNotFoundError as ex:
+                last_err = str(ex)
+                time.sleep(0.01)
+            except Exception as ex:
+                last_err = str(ex)
                 time.sleep(0.01)
         if not self.req or not self.resp:
-            raise FileNotFoundError('shared memory queues not ready for ' + self.path)
+            raise FileNotFoundError('shared memory queues not ready for ' + self.path + (f' ({last_err})' if last_err else ''))
         return self
 
     def close(self):
@@ -353,34 +364,68 @@ class TtyProxy:
                 await self._task_out
             except asyncio.CancelledError:
                 pass
+            except Exception as ex:
+                self.sup._log("reconnect: cancel _task_out error: " + str(ex) + "\n" + traceback.format_exc())
             self._task_out = None
         # Close queues
         try:
             if self.in_q:
                 self.in_q.close()
-        except Exception:
-            pass
+        except Exception as ex:
+            self.sup._log("reconnect: close in_q error: " + str(ex) + "\n" + traceback.format_exc())
         try:
             if self.out_q:
                 self.out_q.close()
-        except Exception:
-            pass
+        except Exception as ex:
+            self.sup._log("reconnect: close out_q error: " + str(ex) + "\n" + traceback.format_exc())
         self.in_q = None
         self.out_q = None
         # Re-open discovery and queues
         info = {}
+        last_err: str | None = None
         for _ in range(500):
             try:
                 with open(self.sup.data_sock, 'r') as f:
                     info = json.load(f)
                 self.in_q = SharedMsgQueue(info['in'])
                 self.out_q = SharedMsgQueue(info['out'])
+                try:
+                    self.sup._log(f"tty.reconnect: discovery in={info.get('in')} out={info.get('out')} size={info.get('size')}")
+                except Exception:
+                    pass
                 break
-            except Exception:
+            except Exception as ex:
+                last_err = str(ex)
                 await asyncio.sleep(0.02)
+        if not (self.in_q and self.out_q):
+            raise RuntimeError("TTY reconnect failed to open shm queues: " + (last_err or "unknown"))
         # Restart output pump
-        if self.out_q:
+        try:
             self._task_out = asyncio.create_task(self._pump_out_to_stdout(interval=0.001))
+            try:
+                self.sup._log("tty.reconnect: output pump restarted")
+            except Exception:
+                pass
+        except Exception as ex:
+            self.sup._log("reconnect: start _task_out error: " + str(ex) + "\n" + traceback.format_exc())
+        # Ensure stdin reader/task is active when not in cmd mode
+        if not self._cmd_mode:
+            loop = asyncio.get_running_loop()
+            if not self._stdin_reader_installed:
+                try:
+                    loop.add_reader(sys.stdin.fileno(), self._on_stdin_readable)
+                    self._stdin_reader_installed = True
+                    self._enter_raw()
+                    try:
+                        self.sup._log("tty.reconnect: stdin reader reinstalled and raw mode ensured")
+                    except Exception:
+                        pass
+                except (NotImplementedError, PermissionError):
+                    self._task_in = asyncio.create_task(self._pump_stdin_to_in())
+                    try:
+                        self.sup._log("tty.reconnect: stdin pump task restarted (no add_reader)")
+                    except Exception:
+                        pass
 
     async def _pump_out_to_stdout(self, interval: float = 0.001):
         assert self.out_q
@@ -511,7 +556,6 @@ class TtyProxy:
                     _print_line("--- dump.log (tail) ---\n" + tail + "\n--- end ---")
                 # Auto-continue and refresh screen to match target PTY
                 await self._exit_cmd_mode()
-                await self._refresh_screen(clear=False)
                 break
             elif cmd in ('r', 'restore'):
                 name = args[0] if args else 'latest'
@@ -522,6 +566,11 @@ class TtyProxy:
                 tail = r.get('restore_log_tail')
                 if tail:
                     _print_line("--- restore.log (tail) ---\n" + tail + "\n--- end ---")
+                errs = r.get('reconnect_errors') or []
+                if errs:
+                    _print_line("[reconnect errors]")
+                    for e in errs:
+                        _print_line(" - " + str(e))
                 # After restore, reconnect TTY and continue
                 try:
                     if self.sup._tty:
@@ -529,7 +578,6 @@ class TtyProxy:
                 except Exception:
                     pass
                 await self._exit_cmd_mode()
-                await self._refresh_screen(clear=False)
                 break
             elif cmd in ('ls', 'list'):
                 r = self.sup.list_checkpoints()
@@ -655,6 +703,310 @@ class WrapperSupervisor:
         self._stop = asyncio.Event()
         self._tty: Optional[TtyProxy] = None
         self._log_path = os.path.join(self.ckpt_dir, 'supervisor.log')
+        self._log_path = os.path.join(self.ckpt_dir, 'supervisor.log')
+        self._precreated_shms: list[shared_memory.SharedMemory] = []
+        self._sigchld_installed: bool = False
+
+    # ---- discovery helpers ----
+    def _cmd_names(self) -> tuple[str, str, int]:
+        sid = hashlib.sha1(self.wrap_sock.encode('utf-8')).hexdigest()[:16]
+        return (f"xspdb_cmd_req_{sid}", f"xspdb_cmd_resp_{sid}", 1 << 16)
+
+    def _tty_names(self) -> tuple[str, str, int]:
+        sid = hashlib.sha1((self.data_sock + ":tty").encode('utf-8')).hexdigest()[:16]
+        return (f"xspdb_tty_in_{sid}", f"xspdb_tty_out_{sid}", 1 << 20)
+
+    def _write_discovery(self, path: str, info: dict) -> None:
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, 'w') as f:
+                json.dump(info, f)
+        except Exception as ex:
+            self._log(f"restore: write discovery failed {path}: {ex}")
+
+    # ---- child reaper for restored wrapper (avoid zombies) ----
+    def _install_sigchld_reaper(self) -> None:
+        if self._sigchld_installed:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+            loop.add_signal_handler(signal.SIGCHLD, lambda: asyncio.create_task(self._reap_children()))
+            self._sigchld_installed = True
+            self._log('reaper: SIGCHLD handler installed')
+        except (NotImplementedError, RuntimeError):
+            # Fallback to signal.signal
+            def _h(signum, frame):
+                try:
+                    # schedule via call_soon_threadsafe if loop available
+                    try:
+                        asyncio.get_event_loop().call_soon_threadsafe(lambda: asyncio.create_task(self._reap_children()))
+                    except Exception:
+                        # last resort: do a non-blocking drain in signal context (quick and safe in CPython)
+                        try:
+                            while True:
+                                pid, st = os.waitpid(-1, os.WNOHANG)
+                                if pid <= 0:
+                                    break
+                        except ChildProcessError:
+                            pass
+                except Exception:
+                    pass
+            try:
+                signal.signal(signal.SIGCHLD, _h)
+                self._sigchld_installed = True
+                self._log('reaper: SIGCHLD handler installed (fallback)')
+            except Exception:
+                pass
+
+    async def _reap_children(self):
+        try:
+            reaped = []
+            while True:
+                try:
+                    pid, st = os.waitpid(-1, os.WNOHANG)
+                except ChildProcessError:
+                    break
+                if pid <= 0:
+                    break
+                reaped.append((pid, st))
+            if reaped:
+                self._log('reaper: reaped ' + ', '.join(f"{pid}:{st}" for pid, st in reaped))
+        except Exception as ex:
+            self._log('reaper: error ' + str(ex))
+
+    # ---- process cleanup helpers ----
+    def _scan_wrapper_pids(self) -> list[int]:
+        pids: list[int] = []
+        proc = '/proc'
+        for name in os.listdir(proc):
+            if not name.isdigit():
+                continue
+            pid = int(name)
+            cmdline_path = os.path.join(proc, name, 'cmdline')
+            try:
+                with open(cmdline_path, 'rb') as f:
+                    raw = f.read()
+                # cmdline is nul-separated
+                parts = raw.split(b'\x00')
+                s = b' '.join(parts).decode('utf-8', errors='ignore')
+            except Exception:
+                continue
+            if 'xspdb_socket_wrapper.py' in s and self.ckpt_dir in s:
+                # Avoid killing our own supervisor process if it somehow matches (it shouldn't)
+                pids.append(pid)
+        return pids
+
+    def _terminate_pids(self, pids: list[int], desc: str) -> None:
+        if not pids:
+            return
+        self._log(f'restore: cleanup {desc} pids={pids} (SIGTERM)')
+        for pid in pids:
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except Exception:
+                pass
+        # wait a bit
+        for _ in range(40):
+            alive = []
+            for pid in pids:
+                try:
+                    os.kill(pid, 0)
+                    alive.append(pid)
+                except Exception:
+                    pass
+            if not alive:
+                break
+            time.sleep(0.05)
+        # escalate
+        alive = []
+        for pid in pids:
+            try:
+                os.kill(pid, 0)
+                alive.append(pid)
+            except Exception:
+                pass
+        if alive:
+            self._log(f'restore: cleanup {desc} still alive={alive} (SIGKILL)')
+            for pid in alive:
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                except Exception:
+                    pass
+            # brief wait
+            time.sleep(0.05)
+
+    def _read_pidfile(self, path: str) -> Optional[int]:
+        try:
+            with open(path, 'r') as f:
+                v = int((f.read().strip() or '0'))
+                return v if v > 0 else None
+        except Exception:
+            return None
+
+    def _list_restore_pids_from_images(self) -> list[int]:
+        root = self._images_root()
+        pids: list[int] = []
+        try:
+            for d in os.listdir(root):
+                ip = os.path.join(root, d, 'restore.pid')
+                if os.path.isfile(ip):
+                    pid = self._read_pidfile(ip)
+                    if pid:
+                        pids.append(pid)
+        except Exception:
+            pass
+        return pids
+
+    def _collect_descendants(self, roots: list[int]) -> list[int]:
+        # Traverse /proc/*/task/*/children to gather subtree PIDs
+        seen = set()
+        stack = list(roots)
+        while stack:
+            pid = stack.pop()
+            if pid in seen:
+                continue
+            seen.add(pid)
+            try:
+                task_dir = f'/proc/{pid}/task'
+                tids = []
+                for t in os.listdir(task_dir):
+                    if t.isdigit():
+                        tids.append(t)
+                for tid in tids:
+                    cpath = f'/proc/{pid}/task/{tid}/children'
+                    try:
+                        with open(cpath, 'r') as f:
+                            data = f.read().strip()
+                        if data:
+                            for c in data.split():
+                                try:
+                                    cp = int(c)
+                                    if cp not in seen:
+                                        stack.append(cp)
+                                except Exception:
+                                    pass
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+        return list(seen)
+
+    def _terminate_trees(self, roots: list[int], desc: str) -> None:
+        if not roots:
+            return
+        # Kill children first, then roots
+        tree = self._collect_descendants(roots)
+        # Ensure roots are included
+        for r in roots:
+            if r not in tree:
+                tree.append(r)
+        # Exclude current supervisor pid from accidental kill
+        safe_tree = [p for p in tree if p != os.getpid()]
+        if not safe_tree:
+            return
+        # Split children and roots
+        roots_set = set(roots)
+        children = [p for p in safe_tree if p not in roots_set]
+        if children:
+            self._terminate_pids(children, desc + '.children')
+        self._terminate_pids([p for p in safe_tree if p in roots_set], desc + '.roots')
+        # Wait for full disappearance of the tree to avoid PID reuse conflicts
+        self._wait_tree_gone(tree, desc)
+
+    def _proc_status(self, pid: int) -> tuple[str|None, str|None, int|None]:
+        # Returns (state, name, ppid) where state like 'R','S','Z', etc.
+        try:
+            with open(f'/proc/{pid}/status', 'r') as f:
+                state = None; name = None; ppid = None
+                for line in f:
+                    if line.startswith('Name:'):
+                        name = line.split(':',1)[1].strip()
+                    elif line.startswith('State:'):
+                        # e.g., State: Z (zombie)
+                        parts = line.split()
+                        if len(parts) >= 2:
+                            state = parts[1]
+                    elif line.startswith('PPid:'):
+                        try:
+                            ppid = int(line.split(':',1)[1].strip())
+                        except Exception:
+                            ppid = None
+                return state, name, ppid
+        except Exception:
+            return None, None, None
+
+    def _read_cmdline(self, pid: int) -> str:
+        try:
+            with open(f'/proc/{pid}/cmdline', 'rb') as f:
+                raw = f.read()
+            return b' '.join(raw.split(b'\x00')).decode('utf-8', errors='ignore')
+        except Exception:
+            return ''
+
+    def _kill_parent_if_needed(self, zombies: list[tuple[int,int]], desc: str) -> bool:
+        """zombies: list of (pid, ppid). If parent is not self and looks like our prior wrapper/supervisor,
+        terminate that parent tree to allow init to reap the zombies. Returns True if any action taken."""
+        acted = False
+        for _, ppid in zombies:
+            try:
+                if ppid <= 1 or ppid == os.getpid():
+                    continue
+                cmd = self._read_cmdline(ppid)
+                if (self.ckpt_dir in cmd) or ('xspdb_socket_wrapper.py' in cmd) or ('xspdb_supervisor.py' in cmd):
+                    self._log(f'restore: killing zombie parent ppid={ppid} cmd={cmd!r}')
+                    self._terminate_trees([ppid], desc + '.ppid')
+                    acted = True
+            except Exception:
+                pass
+        return acted
+
+    def _wait_tree_gone(self, pids: list[int], desc: str, timeout_sec: float = 1.0) -> None:
+        deadline = time.time() + max(0.0, float(timeout_sec))
+        remaining = set(pids)
+        attempts = 0
+        while time.time() < deadline and remaining:
+            alive = []
+            for pid in list(remaining):
+                if os.path.exists(f'/proc/{pid}'):
+                    alive.append(pid)
+                else:
+                    remaining.discard(pid)
+            if not alive:
+                break
+            # Log a snapshot of states for debugging zombies
+            snap = []
+            zombies: list[tuple[int,int]] = []
+            for pid in alive[:8]:  # cap to avoid huge logs
+                st, nm, ppid = self._proc_status(pid)
+                snap.append(f"{pid}:{st or '?'}:{ppid or '?'}:{nm or '?'}")
+                if (st == 'Z') and (ppid is not None):
+                    zombies.append((pid, ppid))
+            self._log(f'restore: waiting tree gone ({desc}), alive={alive} states={" ".join(snap)}')
+            time.sleep(0.05)
+            attempts += 1
+            # If zombies persist and parent seems to be our previous processes, try killing parent to trigger reaping
+            if zombies and (attempts % 5 == 0):  # don't spam; try occasionally
+                if self._kill_parent_if_needed(zombies, desc):
+                    # extend deadline slightly after action
+                    deadline = max(deadline, time.time() + 0.5)
+
+    async def _wait_cmdapi_ready(self, timeout_sec: float = 2.0) -> bool:
+        deadline = time.time() + max(0.0, float(timeout_sec))
+        last_err = None
+        while time.time() < deadline:
+            try:
+                ep = ShmEndpoint(self.wrap_sock).open(timeout_sec=0.5)
+                try:
+                    resp = ep.request({'cmd': 'ping'}, timeout_sec=0.5)
+                    if isinstance(resp, dict) and resp.get('ok'):
+                        return True
+                finally:
+                    ep.close()
+            except Exception as ex:
+                last_err = str(ex)
+            await asyncio.sleep(0.05)
+        self._log('restore: cmdapi not ready: ' + (last_err or 'timeout'))
+        return False
 
     def status(self) -> dict:
         return {
@@ -665,6 +1017,14 @@ class WrapperSupervisor:
             'track_mem': self.enable_track_mem,
             'prev_images_dir': self.prev_images_dir,
         }
+
+    def _log(self, msg: str) -> None:
+        try:
+            os.makedirs(self.ckpt_dir, exist_ok=True)
+            with open(self._log_path, 'a') as f:
+                f.write(time.strftime('%Y-%m-%d %H:%M:%S ') + msg + "\n")
+        except Exception:
+            pass
 
     async def cmd_pause(self) -> dict:
         ep = ShmEndpoint(self.wrap_sock).open()
@@ -751,6 +1111,7 @@ class WrapperSupervisor:
 
     async def restore_checkpoint(self, name_or_latest: Optional[str] = None) -> dict:
         # Resolve images dir
+        self._log('restore: resolve images_dir start')
         root = self._images_root()
         cand = None
         if name_or_latest and name_or_latest != 'latest':
@@ -765,27 +1126,39 @@ class WrapperSupervisor:
             except Exception:
                 cand = None
         if not cand or not os.path.isdir(cand):
+            self._log('restore: images_dir not found')
             return {"ok": False, "error": "images_dir_not_found"}
         images_dir = cand
         restore_log = os.path.join(images_dir, 'restore.log')
         pidfile = os.path.join(images_dir, 'restore.pid')
+        self._log(f'restore: images_dir={images_dir}')
+
+        # Capture discovery shm names before shutdown
+        self._log('restore: collect shm discovery entries')
+        entries = self._collect_shm_entries_from_discovery()
+        self._log(f'restore: entries collected: {entries}')
 
         # Stop current wrapper tree gracefully first, then force if needed
         if self.wrapper_proc and self.wrapper_proc.poll() is None:
+            self._log('restore: stopping current wrapper')
             # Ask wrapper to shutdown (so it unlinks shm)
             try:
+                self._log('restore: sending wrapper shutdown via cmdapi')
                 ep = ShmEndpoint(self.wrap_sock).open()
                 _ = ep.request({'cmd': 'shutdown'})
                 ep.close()
             except Exception:
+                self._log('restore: wrapper shutdown via cmdapi failed')
                 pass
             # Wait a bit
+            self._log('restore: waiting for wrapper to exit')
             for _ in range(20):
                 if self.wrapper_proc.poll() is not None:
                     break
                 time.sleep(0.05)
             # Terminate if still alive
             if self.wrapper_proc.poll() is None:
+                self._log('restore: wrapper still alive, send SIGTERM')
                 try:
                     os.kill(self.wrapper_proc.pid, signal.SIGTERM)
                 except Exception:
@@ -795,41 +1168,211 @@ class WrapperSupervisor:
                         break
                     time.sleep(0.05)
                 if self.wrapper_proc.poll() is None:
+                    self._log('restore: wrapper still alive, send SIGKILL')
                     try:
                         os.kill(self.wrapper_proc.pid, signal.SIGKILL)
                     except Exception:
                         pass
 
-        # Build CRIU restore
-        criu = ['criu', 'restore', '-D', images_dir, '-o', restore_log, '--shell-job', '--pidfile', pidfile]
+        # Additionally, clean up any residual detached wrapper(s) from previous restore runs
+        try:
+            # Candidates from cmdline scan
+            residual = self._scan_wrapper_pids()
+            # Candidates from previous images' restore.pid files
+            residual += self._list_restore_pids_from_images()
+            # De-dup and exclude current managed wrapper pid if present
+            cur = (self.wrapper_proc.pid if self.wrapper_proc and self.wrapper_proc.poll() is None else None)
+            cand = sorted({p for p in residual if p and p != cur})
+            if cand:
+                self._log(f'restore: residual candidate roots={cand}')
+                self._terminate_trees(cand, 'residual_wrappers')
+        except Exception as ex:
+            self._log(f'restore: residual scan failed: {ex}')
+
+        # Pre-create shm segments expected during restore, based on captured discovery
+        self._log('restore: precreate SHMs start')
+        self._precreate_shms(entries)
+        self._log('restore: precreate SHMs done')
+
+        # Pre-write discovery files so supervisor/clients see stable paths during reconnect window
+        try:
+            req, resp, csz = self._cmd_names()
+            self._write_discovery(self.wrap_sock, {'type': 'shm', 'req': req, 'resp': resp, 'size': csz})
+            self._log(f'restore: prewrote cmd discovery {self.wrap_sock} -> req={req} resp={resp}')
+        except Exception:
+            pass
+        try:
+            tin, tout, tsz = self._tty_names()
+            self._write_discovery(self.data_sock, {'type': 'shm', 'in': tin, 'out': tout, 'size': tsz})
+            self._log(f'restore: prewrote tty discovery {self.data_sock} -> in={tin} out={tout}')
+        except Exception:
+            pass
+
+        # Build CRIU restore (detached + sibling so CRIU exits promptly and wrapper becomes sibling)
+        criu = [
+            'criu', 'restore',
+            '-D', images_dir,
+            '-o', restore_log,
+            '--shell-job',
+            '--pidfile', pidfile,
+            '--restore-detached',
+            '--restore-sibling'
+        ]
+        # Remove stale pidfile before restore to avoid reading old PID on failure
+        try:
+            if os.path.exists(pidfile):
+                os.remove(pidfile)
+                self._log('restore: removed stale pidfile before restore')
+        except Exception:
+            pass
+        self._log(f'restore: run CRIU restore: {criu}')
         env = os.environ.copy()
         env.update({k: v for k, v in self.env_overrides.items() if v is not None})
         for k, v in list(self.env_overrides.items()):
             if v is None:
                 env.pop(k, None)
+        t0 = time.time()
         rc = await _run_cmd(criu, env=env, cwd=self.ckpt_dir)
+        self._log(f'restore: CRIU returned rc={rc} duration_sec={time.time()-t0:.3f}')
+        # With --restore-detached, pidfile may be written shortly after CRIU returns; poll briefly
         new_pid = None
-        try:
-            with open(pidfile, 'r') as f:
-                new_pid = int(f.read().strip() or '0')
-        except Exception:
-            new_pid = None
+        for _ in range(200):  # ~2s
+            try:
+                with open(pidfile, 'r') as f:
+                    new_pid = int(f.read().strip() or '0')
+                if new_pid:
+                    break
+            except Exception:
+                pass
+            await asyncio.sleep(0.01)
+        if not new_pid:
+            try:
+                with open(pidfile, 'r') as f:
+                    self._log('restore: pidfile content=' + (f.read().strip() or ''))
+            except Exception:
+                self._log('restore: pidfile not readable yet')
+        self._log(f'restore: read new_pid={new_pid}')
+        if rc != 0:
+            tail = _read_tail(restore_log, 80)
+            self._log('restore: restore.log tail (rc!=0):\n' + tail)
+        self._log(f'restore: read new_pid={new_pid}')
         ok = (rc == 0 and bool(new_pid))
-        # Reconnect TTY to restored wrapper
-        try:
-            if ok and self._tty:
+        self._log(f"restore_checkpoint ok={ok} rc={rc} pid={new_pid} dir={images_dir}")
+        # Cleanup precreated shms (do not unlink, only close; restored wrapper owns lifecycle)
+        for shm in self._precreated_shms:
+            try:
+                shm.close()
+            except Exception:
+                pass
+        self._precreated_shms.clear()
+        # If CRIU did not deliver SIGCONT or delivered too early, send it now
+        if ok and new_pid:
+            try:
+                os.kill(new_pid, signal.SIGCONT)
+                self._log(f"restore: sent SIGCONT to restored wrapper pid={new_pid}")
+                # give wrapper time to reconnect cmd api
+                await asyncio.sleep(0.05)
+            except Exception as ex:
+                self._log(f"restore: failed to send SIGCONT to {new_pid}: {ex}")
+        # Wait for cmdapi discovery to become valid and responsive
+        if ok:
+            ready = await self._wait_cmdapi_ready(timeout_sec=8.0)
+            self._log(f'restore: cmdapi ready={ready}')
+        # Reconnect TTY to restored wrapper, log all exceptions
+        reconnect_errors: list[str] = []
+        if ok and self._tty:
+            try:
+                self._log('restore: tty initial reconnect start')
                 await self._tty.reconnect()
-        except Exception:
-            pass
+                self._log('restore: tty initial reconnect done')
+            except Exception as ex:
+                msg = "tty.reconnect failed: " + str(ex)
+                self._log(msg + "\n" + traceback.format_exc())
+                reconnect_errors.append(msg)
+        # Force wrapper to reopen TTY queues and reinstall hooks, then reconnect again
+        if ok:
+            try:
+                self._log('restore: request wrapper reopen_tty')
+                ep = ShmEndpoint(self.wrap_sock).open(timeout_sec=5.0)
+                resp = ep.request({'cmd': 'reopen_tty'})
+                ep.close()
+                self._log(f'restore: reopen_tty resp={resp}')
+                if not (isinstance(resp, dict) and resp.get('ok')):
+                    reconnect_errors.append('wrapper reopen_tty returned not ok')
+                else:
+                    # Give wrapper a moment to recreate discovery
+                    self._log('restore: sleep 50ms for tty discovery refresh')
+                    await asyncio.sleep(0.05)
+                    if self._tty:
+                        self._log('restore: tty second reconnect start')
+                        await self._tty.reconnect()
+                        self._log('restore: tty second reconnect done')
+            except Exception as ex:
+                msg = "reopen_tty flow failed: " + str(ex)
+                self._log(msg + "\n" + traceback.format_exc())
+                reconnect_errors.append(msg)
+        # Ensure restored wrapper/target are resumed (image may have been taken while paused)
+        if ok:
+            try:
+                self._log('restore: send cmd_resume')
+                r = await self.cmd_resume()
+                self._log(f'restore: cmd_resume resp={r}')
+            except Exception as ex:
+                msg = "cmd_resume after restore failed: " + str(ex)
+                self._log(msg + "\n" + traceback.format_exc())
+                reconnect_errors.append(msg)
         # Post-restore backend commands (optional), e.g., re-init waves
         if ok and self.pre_restore_backend_cmds:
             for cmd in self.pre_restore_backend_cmds:
                 try:
+                    self._log(f'restore: post-restore inject: {cmd}')
                     await self.cmd_inject(cmd + "\n")
                 except Exception:
                     pass
         tail = _read_tail(restore_log, 60)
-        return {"ok": ok, "rc": rc, "wrapper_pid": new_pid, "images_dir": images_dir, "restore_log": restore_log, "restore_log_tail": tail}
+        self._log(f'restore: done ok={ok} rc={rc} pid={new_pid} errors={reconnect_errors}')
+        return {"ok": ok, "rc": rc, "wrapper_pid": new_pid, "images_dir": images_dir, "restore_log": restore_log, "restore_log_tail": tail, "reconnect_errors": reconnect_errors}
+
+    def _collect_shm_entries_from_discovery(self) -> list[tuple[str,int]]:
+        def _safe_load(path):
+            try:
+                with open(path, 'r') as f:
+                    return json.load(f)
+            except Exception:
+                return None
+        entries: list[tuple[str,int]] = []
+        info_cmd = _safe_load(self.wrap_sock)
+        if isinstance(info_cmd, dict) and info_cmd.get('type') == 'shm':
+            sz = int(info_cmd.get('size') or (1<<16))
+            for key in ('req','resp'):
+                n = info_cmd.get(key)
+                if isinstance(n, str):
+                    entries.append((n, sz))
+        info_tty = _safe_load(self.data_sock)
+        if isinstance(info_tty, dict) and info_tty.get('type') == 'shm':
+            sz = int(info_tty.get('size') or (1<<20))
+            for key in ('in','out'):
+                n = info_tty.get(key)
+                if isinstance(n, str):
+                    entries.append((n, sz))
+        return entries
+
+    def _precreate_shms(self, entries: list[tuple[str,int]]):
+        self._precreated_shms = []
+        for name, size in entries:
+            try:
+                shm = shared_memory.SharedMemory(name=name, create=True, size=size)
+                self._log(f"precreate shm {name} size={size}")
+                self._precreated_shms.append(shm)
+            except FileExistsError:
+                try:
+                    shm = shared_memory.SharedMemory(name=name, create=False)
+                    self._log(f"open existing shm {name}")
+                    self._precreated_shms.append(shm)
+                except Exception as ex:
+                    self._log(f"open existing shm failed {name}: {ex}")
+            except Exception as ex:
+                self._log(f"precreate shm failed {name}: {ex}")
 
     def list_checkpoints(self) -> dict:
         root = self._images_root()
@@ -856,6 +1399,8 @@ class WrapperSupervisor:
 
     async def run(self) -> int:
         os.makedirs(self.ckpt_dir, exist_ok=True)
+        # Install child reaper to avoid zombies from restored wrapper
+        self._install_sigchld_reaper()
         # Spawn wrapper
         if not self.target:
             print('No target provided to supervisor', file=sys.stderr)
