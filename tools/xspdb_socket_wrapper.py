@@ -15,7 +15,7 @@ import sys
 import json
 import hashlib
 import struct
-from multiprocessing import shared_memory
+from tools.shm_queue import SharedMsgQueue
 import fcntl
 import termios
 import signal
@@ -25,195 +25,6 @@ import time
 
 _HDR_SIZE = 16  # 8 bytes head, 8 bytes tail
 _WRAP_MARK = 0xFFFFFFFF  # special marker to indicate wrap to 0
-
-
-class SharedMsgQueue:
-    """A simple single-producer/single-consumer ring buffer using POSIX shared memory.
-
-    Layout:
-      [0:8]   head (uint64, bytes written)
-      [8:16]  tail (uint64, bytes read)
-      [16:]   data region of capacity = size - 16
-
-    Frames are stored as [len:u32][payload...]. If a frame cannot fit contiguously,
-    a wrap marker (len=0xFFFFFFFF) is placed, and the frame is written at offset 0.
-    """
-
-    def __init__(self, name: str, size: int = 1 << 20, create: bool = False):
-        if size < (_HDR_SIZE + 8):
-            raise ValueError("size too small for SharedMsgQueue")
-        self.name = name
-        self.size = size
-        self.capacity = size - _HDR_SIZE
-        self.shm = None
-        # Robust create: if already exists (leftover from crash), unlink and recreate
-        if create:
-            try:
-                self.shm = shared_memory.SharedMemory(name=name, create=True, size=size)
-            except FileExistsError:
-                # Attempt to cleanup leftover and recreate
-                try:
-                    tmp = shared_memory.SharedMemory(name=name, create=False)
-                    try:
-                        tmp.unlink()
-                    except Exception:
-                        pass
-                    try:
-                        tmp.close()
-                    except Exception:
-                        pass
-                except FileNotFoundError:
-                    pass
-                # Retry create; if still exists, just open existing
-                try:
-                    self.shm = shared_memory.SharedMemory(name=name, create=True, size=size)
-                except FileExistsError:
-                    self.shm = shared_memory.SharedMemory(name=name, create=False)
-            except Exception:
-                # Fallback: open existing if any
-                try:
-                    self.shm = shared_memory.SharedMemory(name=name, create=False)
-                except Exception as ex:
-                    raise ex
-        else:
-            self.shm = shared_memory.SharedMemory(name=name, create=False)
-        self.buf = self.shm.buf
-        if create:
-            # Initialize head/tail to 0
-            self._write_u64(0, 0)
-            self._write_u64(8, 0)
-
-    def close(self):
-        try:
-            self.shm.close()
-        except Exception:
-            pass
-
-    def unlink(self):
-        try:
-            self.shm.unlink()
-        except FileNotFoundError:
-            pass
-        except Exception:
-            pass
-
-    # --- head/tail helpers ---
-    def _read_u64(self, off: int) -> int:
-        return struct.unpack_from('<Q', self.buf, off)[0]
-
-    def _write_u64(self, off: int, val: int) -> None:
-        struct.pack_into('<Q', self.buf, off, int(val) & 0xFFFFFFFFFFFFFFFF)
-
-    def _read_head(self) -> int:
-        return self._read_u64(0)
-
-    def _read_tail(self) -> int:
-        return self._read_u64(8)
-
-    def _write_head(self, v: int) -> None:
-        self._write_u64(0, v)
-
-    def _write_tail(self, v: int) -> None:
-        self._write_u64(8, v)
-
-    # --- queue ops ---
-    def _space_used(self, head: int, tail: int) -> int:
-        return head - tail if head >= tail else (head + self.capacity - tail)
-
-    def _space_free(self, head: int, tail: int) -> int:
-        return self.capacity - self._space_used(head, tail)
-
-    def push(self, payload: bytes) -> bool:
-        if not isinstance(payload, (bytes, bytearray, memoryview)):
-            raise TypeError("payload must be bytes-like")
-        n = len(payload)
-        if n > (1 << 31) - 8:
-            return False
-        frame_len = 4 + n
-        head = self._read_head()
-        tail = self._read_tail()
-        if self._space_free(head, tail) < frame_len:
-            return False
-        head_off = head % self.capacity
-        # Check if fits contiguously
-        contiguous = self.capacity - head_off
-        if contiguous < frame_len:
-            # Need to insert wrap marker and wrap to 0
-            if contiguous >= 4:
-                struct.pack_into('>I', self.buf, _HDR_SIZE + head_off, _WRAP_MARK)
-                head = head + 4
-                head_off = (head % self.capacity)
-            # wrap
-            head = head + (self.capacity - head_off)
-            head_off = 0
-        # Write length and payload
-        struct.pack_into('>I', self.buf, _HDR_SIZE + head_off, n)
-        self.buf[_HDR_SIZE + head_off + 4 : _HDR_SIZE + head_off + 4 + n] = payload
-        head += frame_len
-        self._write_head(head)
-        return True
-
-    def pop(self) -> bytes | None:
-        head = self._read_head()
-        tail = self._read_tail()
-        if tail == head:
-            return None
-        tail_off = tail % self.capacity
-        # Check wrap marker
-        if self.capacity - tail_off >= 4:
-            (length,) = struct.unpack_from('>I', self.buf, _HDR_SIZE + tail_off)
-            if length == _WRAP_MARK:
-                tail += 4
-                tail_off = (tail % self.capacity)
-                # wrapped, read new length after wrap
-                if tail == head:
-                    self._write_tail(tail)
-                    return None
-                (length,) = struct.unpack_from('>I', self.buf, _HDR_SIZE + tail_off)
-        else:
-            # Not enough space to read length, implicit wrap
-            tail += (self.capacity - tail_off)
-            tail_off = 0
-            if tail == head:
-                self._write_tail(tail)
-                return None
-            (length,) = struct.unpack_from('>I', self.buf, _HDR_SIZE + tail_off)
-
-        if length > self.capacity - 4:
-            # Corruption guard: drop buffer
-            self._write_tail(head)
-            return None
-        need = 4 + length
-        contiguous = self.capacity - tail_off
-        if contiguous < need:
-            # Shouldn't happen due to wrap marker on push, but guard
-            # Treat as implicit wrap
-            tail += (self.capacity - tail_off)
-            tail_off = 0
-            if tail == head:
-                self._write_tail(tail)
-                return None
-            (length,) = struct.unpack_from('>I', self.buf, _HDR_SIZE + tail_off)
-            need = 4 + length
-        data = bytes(self.buf[_HDR_SIZE + tail_off + 4 : _HDR_SIZE + tail_off + 4 + length])
-        tail += need
-        self._write_tail(tail)
-        return data
-
-    async def apop(self, interval_sec: float = 0.01) -> bytes | None:
-        msg = self.pop()
-        if msg is not None:
-            return msg
-        await asyncio.sleep(interval_sec)
-        return self.pop()
-
-    async def iter_messages(self, interval_sec: float = 0.01):
-        while True:
-            msg = self.pop()
-            if msg is None:
-                await asyncio.sleep(interval_sec)
-                continue
-            yield msg
 
 
 class CmdApiServer:
@@ -240,7 +51,8 @@ class CmdApiServer:
             base = getattr(state, 'ckpt_dir', os.path.dirname(self.sock_path))
         except Exception:
             base = os.path.dirname(self.sock_path)
-        self._sig_log = os.path.join(base, 'wrapper.sigcont.log')
+        env_sig = os.environ.get('XSPDB_SIGCONT_LOG')
+        self._sig_log = (env_sig if env_sig and os.path.isabs(env_sig) else os.path.join(base, env_sig or 'wrapper.sigcont.log'))
 
     def _elog_sigcont(self, msg: str) -> None:
         try:
@@ -499,8 +311,10 @@ class TtyForwardServer:
         self._sig_handlers_installed: bool = False
         # debug logs
         ckpt = getattr(state, 'ckpt_dir', os.path.dirname(self.sock_path)) if state is not None else os.path.dirname(self.sock_path)
-        self._log_in = os.path.join(ckpt, 'wrapper.tty.stdin.log')
-        self._log_out = os.path.join(ckpt, 'wrapper.tty.stdout.log')
+        env_in = os.environ.get('XSPDB_TTY_STDIN_LOG')
+        env_out = os.environ.get('XSPDB_TTY_STDOUT_LOG')
+        self._log_in = (env_in if env_in and os.path.isabs(env_in) else os.path.join(ckpt, env_in or 'wrapper.tty.stdin.log'))
+        self._log_out = (env_out if env_out and os.path.isabs(env_out) else os.path.join(ckpt, env_out or 'wrapper.tty.stdout.log'))
 
     @staticmethod
     def _derive_id(key: str) -> str:
@@ -801,8 +615,10 @@ class WrapperState:
         self.tty_server = None
         self._shutdown = asyncio.Event()
         # simple logs for demo
-        self._log_cmd = os.path.join(self.ckpt_dir, 'wrapper.cmd.log')
-        self._log_tty = os.path.join(self.ckpt_dir, 'wrapper.tty.log')
+        _cmd_log = os.environ.get('XSPDB_WRAPPER_CMD_LOG', 'wrapper.cmd.log')
+        _tty_log = os.environ.get('XSPDB_WRAPPER_TTY_LOG', 'wrapper.tty.log')
+        self._log_cmd = _cmd_log if os.path.isabs(_cmd_log) else os.path.join(self.ckpt_dir, _cmd_log)
+        self._log_tty = _tty_log if os.path.isabs(_tty_log) else os.path.join(self.ckpt_dir, _tty_log)
         self._child_pid: int | None = None
         self._pty_master: int | None = None
         self._pty_slave: int | None = None
@@ -1052,9 +868,9 @@ class WrapperState:
 
 def main():
     ap = argparse.ArgumentParser(description="XSPdb Socket Wrapper (skeleton)")
-    ap.add_argument("--cmd-sock", default=".xspdb_ckpt/cmdapi.shm", help="command API discovery path (.shm JSON)")
-    ap.add_argument("--ckpt-dir", default=".xspdb_ckpt", help="checkpoint directory")
-    ap.add_argument("--data-sock", default=".xspdb_ckpt/tty.shm", help="TTY discovery path (.shm JSON)")
+    ap.add_argument("--cmd-sock", default=None, help="command API discovery path (.shm JSON)")
+    ap.add_argument("--ckpt-dir", default=None, help="checkpoint directory")
+    ap.add_argument("--data-sock", default=None, help="TTY discovery path (.shm JSON)")
     ap.add_argument("target", nargs=argparse.REMAINDER, help="target command after --")
     args = ap.parse_args()
 
@@ -1062,7 +878,10 @@ def main():
     if args.target and args.target[0] == "--":
         args.target = args.target[1:]
 
-    state = WrapperState(args.ckpt_dir, args.target or [], args.cmd_sock, args.data_sock)
+    ckpt_dir = args.ckpt_dir or os.environ.get('XSPDB_CKPT_DIR', '.xspdb_ckpt')
+    cmd_sock = args.cmd_sock or os.environ.get('XSPDB_CMD_SOCK', os.path.join(ckpt_dir, 'cmdapi.shm'))
+    data_sock = args.data_sock or os.environ.get('XSPDB_TTY_SOCK', os.path.join(ckpt_dir, 'tty.shm'))
+    state = WrapperState(ckpt_dir, args.target or [], cmd_sock, data_sock)
     try:
         return asyncio.run(state.run())
     except SystemExit as e:

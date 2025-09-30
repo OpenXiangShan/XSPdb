@@ -24,5 +24,14 @@
     "lazy_pages": false,
     "track_mem": false,
     "prev_images_dir": ""
+  },
+  "images_subdir": "images",
+  "logs": {
+    "supervisor": "supervisor.log",
+    "wrapper_cmd": "wrapper.cmd.log",
+    "wrapper_tty": "wrapper.tty.log",
+    "sigcont": "wrapper.sigcont.log",
+    "tty_stdin": "wrapper.tty.stdin.log",
+    "tty_stdout": "wrapper.tty.stdout.log"
   }
 }

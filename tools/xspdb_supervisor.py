@@ -28,153 +28,12 @@ import hashlib
 
 from multiprocessing import shared_memory
 
-try:
-    # Reuse SharedMsgQueue implementation from wrapper
-    from tools.xspdb_socket_wrapper import SharedMsgQueue  # type: ignore
-except Exception:
-    # Minimal inline fallback (same format: 16B hdr, >I length, 0xFFFFFFFF wrap)
-    _HDR_SIZE = 16
-    _WRAP_MARK = 0xFFFFFFFF
-
-    class SharedMsgQueue:
-        def __init__(self, name: str, size: int = 1 << 16, create: bool = False):
-            self.name = name
-            self.size = size
-            self.capacity = size - _HDR_SIZE
-            self.shm = shared_memory.SharedMemory(name=name, create=create, size=size)
-            self.buf = self.shm.buf
-            if create:
-                struct.pack_into('<Q', self.buf, 0, 0)
-                struct.pack_into('<Q', self.buf, 8, 0)
-
-        def close(self):
-            try: self.shm.close()
-            except Exception: pass
-
-        def unlink(self):
-            try: self.shm.unlink()
-            except Exception: pass
-
-        def _ru64(self, off):
-            return struct.unpack_from('<Q', self.buf, off)[0]
-
-        def _wu64(self, off, v):
-            struct.pack_into('<Q', self.buf, off, int(v) & 0xFFFFFFFFFFFFFFFF)
-
-        def push(self, payload: bytes) -> bool:
-            head = self._ru64(0); tail = self._ru64(8)
-            used = head - tail if head >= tail else (head + self.capacity - tail)
-            free = self.capacity - used
-            need = 4 + len(payload)
-            if free < need: return False
-            off = head % self.capacity
-            contig = self.capacity - off
-            if contig < need:
-                if contig >= 4:
-                    struct.pack_into('>I', self.buf, _HDR_SIZE + off, _WRAP_MARK)
-                    head += 4; off = head % self.capacity
-                head += (self.capacity - off); off = 0
-            struct.pack_into('>I', self.buf, _HDR_SIZE + off, len(payload))
-            self.buf[_HDR_SIZE + off + 4 : _HDR_SIZE + off + 4 + len(payload)] = payload
-            head += need
-            self._wu64(0, head)
-            return True
-
-        def pop(self) -> Optional[bytes]:
-            head = self._ru64(0); tail = self._ru64(8)
-            if tail == head: return None
-            cap = self.capacity
-            off = tail % cap
-            if cap - off >= 4:
-                (ln,) = struct.unpack_from('>I', self.buf, _HDR_SIZE + off)
-                if ln == _WRAP_MARK:
-                    tail += 4; off = tail % cap
-                    if tail == head:
-                        self._wu64(8, tail); return None
-                    (ln,) = struct.unpack_from('>I', self.buf, _HDR_SIZE + off)
-            else:
-                tail += (cap - off); off = 0
-                if tail == head:
-                    self._wu64(8, tail); return None
-                (ln,) = struct.unpack_from('>I', self.buf, _HDR_SIZE + off)
-            data = bytes(self.buf[_HDR_SIZE + off + 4 : _HDR_SIZE + off + 4 + ln])
-            tail += 4 + ln
-            self._wu64(8, tail)
-            return data
-
-        async def apop(self, interval_sec: float = 0.01) -> Optional[bytes]:
-            d = self.pop()
-            if d is not None: return d
-            await asyncio.sleep(interval_sec)
-            return self.pop()
+from tools.shm_queue import SharedMsgQueue
+from tools.shm_endpoint import ShmEndpoint
+from tools.log_config import LogConfig
 
 
-class ShmEndpoint:
-    def __init__(self, path: str):
-        self.path = os.path.abspath(path)
-        self.req: Optional[SharedMsgQueue] = None
-        self.resp: Optional[SharedMsgQueue] = None
-
-    def open(self, timeout_sec: float = 5.0):
-        info = {}
-        deadline = time.time() + max(0.0, float(timeout_sec))
-        last_err = None
-        # Retry reading discovery file until it reports shm type
-        while time.time() < deadline:
-            try:
-                with open(self.path, 'r') as f:
-                    info = json.load(f)
-                if info.get('type') == 'shm':
-                    break
-                last_err = f"bad_type={info.get('type')}"
-            except Exception as ex:
-                last_err = str(ex)
-            time.sleep(0.01)
-        if info.get('type') != 'shm':
-            raise RuntimeError('discovery file is not shm type: ' + self.path + (f' ({last_err})' if last_err else ''))
-        # Retry opening queues; wrapper may have just created them
-        last_err = None
-        while time.time() < deadline:
-            try:
-                self.req = SharedMsgQueue(info['req'])
-                self.resp = SharedMsgQueue(info['resp'])
-                break
-            except FileNotFoundError as ex:
-                last_err = str(ex)
-                time.sleep(0.01)
-            except Exception as ex:
-                last_err = str(ex)
-                time.sleep(0.01)
-        if not self.req or not self.resp:
-            raise FileNotFoundError('shared memory queues not ready for ' + self.path + (f' ({last_err})' if last_err else ''))
-        return self
-
-    def close(self):
-        if self.req:
-            self.req.close(); self.req = None
-        if self.resp:
-            self.resp.close(); self.resp = None
-
-    def request(self, obj: dict, timeout_sec: float = 5.0) -> dict:
-        data = (json.dumps(obj) + '\n').encode('utf-8')
-        # Push with retry
-        t0 = time.time()
-        while time.time() - t0 < timeout_sec:
-            if self.req and self.req.push(data):
-                break
-            time.sleep(0.01)
-        # Pop response
-        t0 = time.time()
-        while time.time() - t0 < timeout_sec:
-            if self.resp:
-                d = self.resp.pop()
-                if d:
-                    try:
-                        return json.loads(d.decode('utf-8'))
-                    except Exception:
-                        return {"ok": False, "error": "bad_json"}
-            time.sleep(0.01)
-        return {"ok": False, "error": "timeout"}
+    
 
 
 class SupervisorApiServer:
@@ -703,7 +562,9 @@ class WrapperSupervisor:
                  enable_lazy_pages=False, enable_track_mem=False,
                  prev_images_dir=None, pre_save_backend_cmds=None,
                  pre_restore_backend_cmds=None, env_overrides=None,
-                 prefix=None, cmd_key='c'):
+                 prefix=None, cmd_key='c',
+                 images_subdir: str = 'images',
+                 log_cfg: Optional[LogConfig] = None):
         self.ckpt_dir = os.path.abspath(ckpt_dir)
         self.api_sock = os.path.abspath(api_sock)
         self.wrap_sock = os.path.abspath(wrap_sock or os.path.join(self.ckpt_dir, "cmdapi.shm"))
@@ -721,7 +582,9 @@ class WrapperSupervisor:
         self.api_server: Optional[SupervisorApiServer] = None
         self._stop = asyncio.Event()
         self._tty: Optional[TtyProxy] = None
-        self._log_path = os.path.join(self.ckpt_dir, 'supervisor.log')
+        self.images_subdir = images_subdir or 'images'
+        self.log_cfg = log_cfg or LogConfig()
+        self._log_path = os.path.join(self.ckpt_dir, (self.log_cfg.supervisor or 'supervisor.log'))
         self._precreated_shms: list[shared_memory.SharedMemory] = []
         self._sigchld_installed: bool = False
 
@@ -1073,7 +936,7 @@ class WrapperSupervisor:
             ep.close()
 
     def _images_root(self) -> str:
-        d = os.path.join(self.ckpt_dir, 'images')
+        d = os.path.join(self.ckpt_dir, self.images_subdir or 'images')
         os.makedirs(d, exist_ok=True)
         return d
 
@@ -1434,6 +1297,11 @@ class WrapperSupervisor:
         for k, v in list(self.env_overrides.items()):
             if v is None:
                 env.pop(k, None)
+        # Apply log config as env for wrapper
+        env.update({k: v for k, v in self.log_cfg.to_env(self.ckpt_dir).items() if v})
+        env.setdefault('XSPDB_CKPT_DIR', self.ckpt_dir)
+        env.setdefault('XSPDB_CMD_SOCK', self.wrap_sock)
+        env.setdefault('XSPDB_TTY_SOCK', self.data_sock)
         self.wrapper_proc = subprocess.Popen(args, env=env)
         # Start API server
         self.api_server = SupervisorApiServer(self.api_sock, self)
@@ -1486,18 +1354,33 @@ def _read_tail(path: str, max_lines: int = 40) -> str:
 
 def main():
     ap = argparse.ArgumentParser(description="XSPdb CRIU Supervisor")
-    ap.add_argument("--ckpt-dir", default=".xspdb_ckpt", help="checkpoint directory")
-    ap.add_argument("--sock", default=".xspdb_ckpt/api.shm", help="XSPdb API discovery path (.shm JSON)")
-    ap.add_argument("--wrap-sock", default=".xspdb_ckpt/cmdapi.shm", help="wrapper control discovery path (.shm JSON)")
-    ap.add_argument("--data-sock", default=".xspdb_ckpt/tty.shm", help="wrapper data discovery path (.shm JSON)")
+    ap.add_argument("--ckpt-dir", default=None, help="checkpoint directory")
+    ap.add_argument("--sock", default=None, help="XSPdb API discovery path (.shm JSON)")
+    ap.add_argument("--wrap-sock", default=None, help="wrapper control discovery path (.shm JSON)")
+    ap.add_argument("--data-sock", default=None, help="wrapper data discovery path (.shm JSON)")
     ap.add_argument("--", dest="dashdash", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("target", nargs=argparse.REMAINDER, help="target command to run after --")
     args = ap.parse_args()
+    ckpt_dir = args.ckpt_dir or os.environ.get('XSPDB_CKPT_DIR', '.xspdb_ckpt')
+    api_sock = args.sock or os.environ.get('XSPDB_API_SOCK', os.path.join(ckpt_dir, 'api.shm'))
+    wrap_sock = args.wrap_sock or os.environ.get('XSPDB_WRAP_SOCK', os.path.join(ckpt_dir, 'cmdapi.shm'))
+    data_sock = args.data_sock or os.environ.get('XSPDB_TTY_SOCK', os.path.join(ckpt_dir, 'tty.shm'))
+    # Build log config from env if present
+    log_cfg = LogConfig(
+        supervisor=os.environ.get('XSPDB_SUPERVISOR_LOG', 'supervisor.log'),
+        wrapper_cmd=os.environ.get('XSPDB_WRAPPER_CMD_LOG'),
+        wrapper_tty=os.environ.get('XSPDB_WRAPPER_TTY_LOG'),
+        sigcont=os.environ.get('XSPDB_SIGCONT_LOG'),
+        tty_stdin=os.environ.get('XSPDB_TTY_STDIN_LOG'),
+        tty_stdout=os.environ.get('XSPDB_TTY_STDOUT_LOG'),
+    )
 
     sup = WrapperSupervisor(
-        args.ckpt_dir, args.sock, args.target,
-        wrap_sock=args.wrap_sock,
-        data_sock=args.data_sock,
+        ckpt_dir, api_sock, args.target,
+        wrap_sock=wrap_sock,
+        data_sock=data_sock,
+        images_subdir=os.environ.get('XSPDB_IMAGES_SUBDIR', 'images'),
+        log_cfg=log_cfg,
     )
     try:
         return asyncio.run(sup.run())

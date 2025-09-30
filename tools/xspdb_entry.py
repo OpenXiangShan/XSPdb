@@ -72,11 +72,23 @@ def main():
 
     cfg = load_config(args.config)
 
-    ckpt_dir = args.ckpt_dir or cfg.get('ckpt_dir', '.xspdb_ckpt')
-    sock = args.sock or cfg.get('sock', '.xspdb_ckpt/api.shm')
+    ckpt_dir = args.ckpt_dir or cfg.get('ckpt_dir', os.environ.get('XSPDB_CKPT_DIR', '.xspdb_ckpt'))
+    sock = args.sock or cfg.get('sock', os.environ.get('XSPDB_API_SOCK', os.path.join(ckpt_dir, 'api.shm')))
     prefix = decode_ctrl(args.prefix_key or cfg.get('prefix_key', '^A'))
     cmd_key = (args.cmd_key or cfg.get('cmd_key', 'c'))
     target = args.target or cfg.get('target', [])
+    images_subdir = cfg.get('images_subdir', os.environ.get('XSPDB_IMAGES_SUBDIR', 'images'))
+    # LogConfig via nested object or env fallbacks
+    logs_cfg = cfg.get('logs', {}) if isinstance(cfg.get('logs', {}), dict) else {}
+    from tools.xspdb_supervisor import LogConfig
+    log_cfg = LogConfig(
+        supervisor=logs_cfg.get('supervisor', os.environ.get('XSPDB_SUPERVISOR_LOG', 'supervisor.log')),
+        wrapper_cmd=logs_cfg.get('wrapper_cmd', os.environ.get('XSPDB_WRAPPER_CMD_LOG')),
+        wrapper_tty=logs_cfg.get('wrapper_tty', os.environ.get('XSPDB_WRAPPER_TTY_LOG')),
+        sigcont=logs_cfg.get('sigcont', os.environ.get('XSPDB_SIGCONT_LOG')),
+        tty_stdin=logs_cfg.get('tty_stdin', os.environ.get('XSPDB_TTY_STDIN_LOG')),
+        tty_stdout=logs_cfg.get('tty_stdout', os.environ.get('XSPDB_TTY_STDOUT_LOG')),
+    )
     manifest_include = cfg.get('manifest_include', [])
     pre_save_backend_cmds = cfg.get('pre_save_backend_cmds', [])
     pre_restore_backend_cmds = cfg.get('pre_restore_backend_cmds', [])
@@ -135,18 +147,26 @@ def main():
     # 新架构：使用 Socket-Wrapper supervisor
     from tools.xspdb_supervisor import WrapperSupervisor
 
+    # Discovery paths for wrapper (allow override)
+    wrap_sock = cfg.get('wrap_sock') or os.path.join(ckpt_dir, 'cmdapi.shm')
+    data_sock = cfg.get('data_sock') or os.path.join(ckpt_dir, 'tty.shm')
+
+    # No need to push log envs here; supervisor will derive and export for wrapper
+
     sup = WrapperSupervisor(
         ckpt_dir, sock, target,
-        wrap_sock=os.path.join(ckpt_dir, 'cmdapi.shm'),
+        wrap_sock=wrap_sock,
         enable_lazy_pages=enable_lazy_pages,
         enable_track_mem=enable_track_mem,
         prev_images_dir=prev_images_dir,
         pre_save_backend_cmds=pre_save_backend_cmds,
         pre_restore_backend_cmds=pre_restore_backend_cmds,
-        data_sock=os.path.join(ckpt_dir, 'tty.shm'),
+        data_sock=data_sock,
         prefix=prefix,
         cmd_key=(cmd_key[:1] if isinstance(cmd_key, str) else 'c'),
         env_overrides=env_cfg,
+        images_subdir=images_subdir,
+        log_cfg=log_cfg,
     )
     return asyncio.run(sup.run())
 

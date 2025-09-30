@@ -97,7 +97,8 @@ def load_discovery(path: str) -> dict:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--ckpt-dir', default='.xspdb_ckpt')
+    import os
+    ap.add_argument('--ckpt-dir', default=os.environ.get('XSPDB_CKPT_DIR', '.xspdb_ckpt'))
     ap.add_argument('--which', choices=['cmd', 'tty', 'api'], required=True)
     ap.add_argument('op', nargs='?')
     ap.add_argument('--data')
