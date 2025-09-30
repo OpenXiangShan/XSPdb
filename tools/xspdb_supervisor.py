@@ -16,6 +16,8 @@ import asyncio
 import json
 import os
 import signal
+import fcntl
+import termios
 import struct
 import subprocess
 import sys
@@ -312,6 +314,19 @@ class TtyProxy:
                 await asyncio.sleep(0.01)
         if not self.in_q or not self.out_q:
             raise RuntimeError('TTY shm queues not ready')
+        # Brief on-screen hint before entering raw mode
+        try:
+            def _fmt_key(ch: str) -> str:
+                if not ch:
+                    return '^A'
+                c = ch[0]
+                o = ord(c)
+                if 0 < o < 32:
+                    return '^' + chr(o + 64)
+                return c
+            _print_line(f"[XSPdb] Press {_fmt_key(self._prefix)} then '{self._cmd_key}' to enter command mode (type 'help' there).")
+        except Exception:
+            pass
         # Set raw mode on stdin
         self._enter_raw()
         # Send initial winsize
@@ -533,7 +548,7 @@ class TtyProxy:
         await self._refresh_screen(clear=False)
 
     async def _cmd_repl(self):
-        _print_line("\n[Command Mode] Type 'help' for commands.")
+        _print_line("\n[Command Mode] Type 'help' for commands. 'continue' to return to target.")
         while True:
             try:
                 line = await asyncio.to_thread(input, "xspdb> ")
@@ -597,7 +612,11 @@ class TtyProxy:
             elif cmd in ('q', 'quit', 'exit', 'shutdown'):
                 await self.sup.shutdown(); break
             elif cmd in ('h', 'help', '?'):
-                _print_line("commands: save [name], restore [name|latest], pause, resume, inject <text>, continue, shutdown")
+                _print_line(
+                    "commands: save [name], restore [name|latest], list, pause, resume, inject <text>, continue, shutdown\n"
+                    "aliases: c/cont/back/continue, q/quit/exit/shutdown\n"
+                    "hint: Press the configured prefix then cmd-key to enter this mode."
+                )
             else:
                 _print_line("unknown command; type 'help'")
 
@@ -702,7 +721,6 @@ class WrapperSupervisor:
         self.api_server: Optional[SupervisorApiServer] = None
         self._stop = asyncio.Event()
         self._tty: Optional[TtyProxy] = None
-        self._log_path = os.path.join(self.ckpt_dir, 'supervisor.log')
         self._log_path = os.path.join(self.ckpt_dir, 'supervisor.log')
         self._precreated_shms: list[shared_memory.SharedMemory] = []
         self._sigchld_installed: bool = False

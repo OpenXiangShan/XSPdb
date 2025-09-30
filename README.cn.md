@@ -230,13 +230,13 @@ options:
 python3 tools/xspdb_entry.py -c xspdb.json
 ```
 
-3) 命令模式与热键：在真实终端按 `Ctrl-A c`（可通过 `prefix_key` / `cmd_key` 配置）。看到 `[ckpt] >` 后可输入：
+3) 命令模式与热键：在真实终端按 `Ctrl-A c`（可通过 `prefix_key` / `cmd_key` 配置）。看到 `xspdb>` 提示后可输入：
 
-- `list`：列出检查点（最新项会标注 latest）
+- `list`：按时间列出检查点目录
 - `save [name]`：保存检查点（保存前可自动注入命令，如 xwave_flush）
 - `restore [name|latest]`：从检查点恢复（先停旧、再启新，避免双写）
 - `help` 或 `?`：显示帮助、当前热键、目录与 socket
-- `back`：仅退出命令模式，恢复后端 I/O
+- `continue` / `back`：退出命令模式返回 TTY，恢复后端 I/O
 - `exit`：退出并清理所有后台进程（终止 wrapper+target 与 supervisor）
 
 说明与注意：

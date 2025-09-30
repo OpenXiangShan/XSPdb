@@ -18,9 +18,7 @@ import struct
 from multiprocessing import shared_memory
 import fcntl
 import termios
-import pty
 import signal
-import subprocess
 import traceback
 import time
 
@@ -768,14 +766,6 @@ class TtyForwardServer:
         except Exception:
             pass
 
-    async def pause(self):
-        self._paused = True
-        return True
-
-    async def resume(self):
-        self._paused = False
-        return True
-
     def _blog(self, path: str, data: bytes):
         try:
             os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -793,12 +783,11 @@ class TtyForwardServer:
             return data[:limit]
 
     async def pause(self):
+        self._paused = True
         return True
 
     async def resume(self):
-        return True
-
-    async def detach(self):
+        self._paused = False
         return True
 
 

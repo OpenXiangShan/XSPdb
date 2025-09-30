@@ -226,7 +226,7 @@ Steps (entry + config):
 python3 tools/xspdb_entry.py -c xspdb.json
 ```
 
-3) Command mode hotkey: press `Ctrl-A c` on your real terminal (configurable via `prefix_key` / `cmd_key`). Once `[ckpt] >` appears, you can type:
+3) Command mode hotkey: press `Ctrl-A c` on your real terminal (configurable via `prefix_key` / `cmd_key`). Once `xspdb>` appears, you can type:
 
 - `list`: list checkpoints (latest marked)
 - `save [name]`: save a checkpoint (can auto-inject commands like `xwave_flush` before saving)
