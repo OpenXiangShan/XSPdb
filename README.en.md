@@ -274,3 +274,53 @@ You can enable additional CRIU options to speed up dump/restore (subject to kern
 - `criu.prev_images_dir`: passes `--prev-images-dir <PATH>` to dump/restore for reusing previous images.
 
 You can also enable these via the supervisor CLI: `--lazy-pages`, `--track-mem`, `--prev-images-dir PATH`.
+
+### Shared-Memory IPC (shm_queue/shm_endpoint)
+
+This repo includes a lightweight SPSC shared-memory message queue and a small
+request/response endpoint built on top of it.
+
+- `tools/shm_queue.py` (`SharedMsgQueue`): a lock-free ring buffer over
+  `multiprocessing.shared_memory`, using framed messages `[len:u32][payload]`.
+- `tools/shm_endpoint.py` (`ShmEndpoint`): attaches to a pair of queues via
+  a JSON discovery file and implements a simple req/resp helper.
+
+Discovery file example:
+
+```
+{"type": "shm", "req": "xspdb_demo_req", "resp": "xspdb_demo_resp", "size": 65536}
+```
+
+Server-side example (create queues and serve):
+
+```python
+from tools.shm_queue import SharedMsgQueue
+import json, os
+
+req = SharedMsgQueue("xspdb_demo_req", size=1<<16, create=True)
+resp = SharedMsgQueue("xspdb_demo_resp", size=1<<16, create=True)
+with open("/tmp/demo.shm", "w") as f:
+    json.dump({"type": "shm", "req": req.name, "resp": resp.name, "size": req.size}, f)
+
+while True:
+    msg = req.pop()
+    if not msg:
+        continue
+    # echo back as JSON line
+    resp.push(msg)
+```
+
+Client-side example (open endpoint and request):
+
+```python
+from tools.shm_endpoint import ShmEndpoint
+
+ep = ShmEndpoint("/tmp/demo.shm").open()
+print(ep.request({"cmd": "ping"}))
+ep.close()
+```
+
+Notes:
+- The queue is single-producer/single-consumer by design; do not share a single
+  queue among multiple writers/readers concurrently.
+- Messages are arbitrary bytes; `ShmEndpoint` uses one-JSON-line per request/response.

@@ -278,3 +278,50 @@ Hook 函数签名：`def pre_save(frontend): ...`
 - `criu.prev_images_dir`：为 dump/restore 传入 `--prev-images-dir <PATH>` 以复用之前的镜像数据。
 
 也可直接通过监督器脚本 CLI 开启：`--lazy-pages`、`--track-mem`、`--prev-images-dir PATH`。
+
+### 共享内存 IPC（shm_queue/shm_endpoint）
+
+本仓库提供一个轻量的单生产者/单消费者（SPSC）共享内存消息队列，以及在其之上实现的简易请求/响应端点。
+
+- `tools/shm_queue.py`（`SharedMsgQueue`）：基于 `multiprocessing.shared_memory` 的无锁环形缓冲，
+  采用帧格式 `[len:u32][payload]` 传输消息。
+- `tools/shm_endpoint.py`（`ShmEndpoint`）：通过 JSON 发现文件连接一对队列，封装简单的请求/响应流程。
+
+发现文件示例：
+
+```
+{"type": "shm", "req": "xspdb_demo_req", "resp": "xspdb_demo_resp", "size": 65536}
+```
+
+服务端示例（创建队列并提供服务）：
+
+```python
+from tools.shm_queue import SharedMsgQueue
+import json, os
+
+req = SharedMsgQueue("xspdb_demo_req", size=1<<16, create=True)
+resp = SharedMsgQueue("xspdb_demo_resp", size=1<<16, create=True)
+with open("/tmp/demo.shm", "w") as f:
+    json.dump({"type": "shm", "req": req.name, "resp": resp.name, "size": req.size}, f)
+
+while True:
+    msg = req.pop()
+    if not msg:
+        continue
+    # 这里直接回显（假设是 JSON 一行）
+    resp.push(msg)
+```
+
+客户端示例（打开端点并请求）：
+
+```python
+from tools.shm_endpoint import ShmEndpoint
+
+ep = ShmEndpoint("/tmp/demo.shm").open()
+print(ep.request({"cmd": "ping"}))
+ep.close()
+```
+
+注意：
+- 该队列仅支持单写单读的并发模型；请勿让多个写者/读者同时操作同一条队列。
+- 队列承载任意字节数据；`ShmEndpoint` 采用“每条消息为一行 JSON”的约定。

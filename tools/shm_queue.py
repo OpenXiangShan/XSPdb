@@ -1,23 +1,44 @@
 #!/usr/bin/env python3
 #coding=utf-8
+"""shm_queue
+
+Single-producer/single-consumer (SPSC) ring buffer built on POSIX shared
+memory (multiprocessing.shared_memory) to transfer framed messages.
+
+Frame format:
+  [len:u32][payload...]
+
+- `len` is big-endian ('>I').
+- If the remaining contiguous space cannot fit a full frame, a special
+  wrap marker (len=0xFFFFFFFF) is written to signal the consumer to continue
+  from offset 0 for that frame.
+
+Header layout (little-endian u64):
+  [0:8]   head (total bytes written)
+  [8:16]  tail (total bytes read)
+  [16:]   data region, capacity = size - 16
+
+Notes:
+- Only SPSC is supported.
+- push/pop are lock-free; the caller must ensure single writer/reader.
+- Geared for simple and reliable short-message IPC.
+"""
 
 import struct
 from multiprocessing import shared_memory
 
 _HDR_SIZE = 16  # 8 bytes head, 8 bytes tail
-_WRAP_MARK = 0xFFFFFFFF  # special marker to indicate wrap to 0
+_WRAP_MARK = 0xFFFFFFFF  # special marker indicating "wrap to 0"
 
 
 class SharedMsgQueue:
-    """Single-producer/single-consumer ring buffer over POSIX shared memory.
+    """SPSC shared-memory message queue (ring buffer).
 
-    Header layout:
-      [0:8]   head (uint64, bytes written)
-      [8:16]  tail (uint64, bytes read)
-      [16:]   data region of capacity = size - 16
+    - name: shared memory name.
+    - size: total shared memory size (includes 16B header).
+    - create: True to create; False to attach to an existing segment.
 
-    Frames: [len:u32][payload...] using big-endian length. If a frame cannot fit
-    contiguously, a wrap marker (len=0xFFFFFFFF) is placed, and the frame is written at 0.
+    Usage: producer calls `push(payload: bytes)`; consumer calls `pop()`/`apop()`.
     """
 
     def __init__(self, name: str, size: int = 1 << 20, create: bool = False):
@@ -61,12 +82,14 @@ class SharedMsgQueue:
             self._write_u64(8, 0)
 
     def close(self):
+        """Close the shared memory handle (does not unlink)."""
         try:
             self.shm.close()
         except Exception:
             pass
 
     def unlink(self):
+        """Unlink the shared memory segment (call when no process needs it)."""
         try:
             self.shm.unlink()
         except FileNotFoundError:
@@ -99,6 +122,11 @@ class SharedMsgQueue:
         return self.capacity - self._space_used(head, tail)
 
     def push(self, payload: bytes) -> bool:
+        """Write one message frame.
+
+        - payload: bytes; per-frame max is ~2GB (u32-limited).
+        Returns True on success; False if insufficient space or too large.
+        """
         if not isinstance(payload, (bytes, bytearray, memoryview)):
             raise TypeError("payload must be bytes-like")
         n = len(payload)
@@ -125,6 +153,7 @@ class SharedMsgQueue:
         return True
 
     def pop(self) -> bytes | None:
+        """Read one message frame; returns None if the queue is empty."""
         head = self._read_head()
         tail = self._read_tail()
         if tail == head:
@@ -160,16 +189,17 @@ class SharedMsgQueue:
                 return None
             (length,) = struct.unpack_from('>I', self.buf, _HDR_SIZE + tail_off)
             need = 4 + length
+        # Copy data and advance tail to release space
         data = bytes(self.buf[_HDR_SIZE + tail_off + 4 : _HDR_SIZE + tail_off + 4 + length])
         tail += need
         self._write_tail(tail)
         return data
 
     async def apop(self, interval_sec: float = 0.01) -> bytes | None:
+        """Async read: if no message, wait briefly then try again."""
         msg = self.pop()
         if msg is not None:
             return msg
         import asyncio
         await asyncio.sleep(interval_sec)
         return self.pop()
-
