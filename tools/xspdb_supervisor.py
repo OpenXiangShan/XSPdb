@@ -22,6 +22,7 @@ import struct
 import subprocess
 import sys
 import time
+from collections import deque
 from typing import Optional
 import traceback
 import hashlib
@@ -569,6 +570,80 @@ def _clear_local_terminal():
         pass
 
 
+class HeadlessTtyCollector:
+    """Drain wrapper TTY output into a buffer/log in headless mode."""
+    def __init__(self, sup: 'WrapperSupervisor', buf_lines: int = 4096):
+        self.sup = sup
+        self.buf = deque(maxlen=buf_lines)
+        self.out_q: Optional[SharedMsgQueue] = None
+        self._task: Optional[asyncio.Task] = None
+        self._stop = asyncio.Event()
+        self._log_path = os.path.join(self.sup.ckpt_dir, 'wrapper.tty.headless.log')
+
+    async def start(self):
+        info = None
+        for _ in range(500):
+            if os.path.exists(self.sup.data_sock):
+                try:
+                    with open(self.sup.data_sock, 'r') as f:
+                        info = json.load(f)
+                except Exception:
+                    info = None
+                if info:
+                    break
+            await asyncio.sleep(0.01)
+        if not info or info.get('type') != 'shm' or not info.get('out'):
+            try:
+                self.sup._log('headless tty: discovery missing, skip collector')
+            except Exception:
+                pass
+            return
+        try:
+            self.out_q = SharedMsgQueue(info['out'], size=info.get('size', 1 << 20), create=False)
+        except FileNotFoundError:
+            self.out_q = SharedMsgQueue(info['out'], size=info.get('size', 1 << 20), create=True)
+        self._task = asyncio.create_task(self._collect_loop())
+
+    async def stop(self):
+        self._stop.set()
+        if self._task:
+            self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
+        if self.out_q:
+            try:
+                self.out_q.close()
+            except Exception:
+                pass
+            self.out_q = None
+
+    async def _collect_loop(self):
+        assert self.out_q
+        while not self._stop.is_set():
+            try:
+                raw = await self.out_q.apop()
+                if not raw:
+                    continue
+                txt = raw.decode('utf-8', errors='replace')
+                self.buf.append(txt)
+                try:
+                    os.makedirs(os.path.dirname(self._log_path), exist_ok=True)
+                    with open(self._log_path, 'a', encoding='utf-8', errors='ignore') as f:
+                        f.write(txt)
+                except Exception:
+                    pass
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                await asyncio.sleep(0.01)
+
+    def tail(self, n: int = 200) -> str:
+        lines = list(self.buf)[-n:]
+        return ''.join(lines)
+
+
 class WrapperSupervisor:
     def __init__(self, ckpt_dir, api_sock, target_argv,
                  wrap_sock=None, data_sock=None,
@@ -577,7 +652,12 @@ class WrapperSupervisor:
                  pre_restore_backend_cmds=None, env_overrides=None,
                  prefix=None, cmd_key='c',
                  images_subdir: str = 'images',
-                 log_cfg: Optional[LogConfig] = None):
+                 log_cfg: Optional[LogConfig] = None,
+                 headless: bool = False,
+                 tty_buf_lines: int = 4096,
+                 agent_module: Optional[str] = None,
+                 agent_endpoint: Optional[str] = None,
+                 ckpt_enabled: bool = True):
         self.ckpt_dir = os.path.abspath(ckpt_dir)
         self.api_sock = os.path.abspath(api_sock)
         self.wrap_sock = os.path.abspath(wrap_sock or os.path.join(self.ckpt_dir, "cmdapi.shm"))
@@ -595,6 +675,7 @@ class WrapperSupervisor:
         self.api_server: Optional[SupervisorApiServer] = None
         self._stop = asyncio.Event()
         self._tty: Optional[TtyProxy] = None
+        self._tty_sink: Optional['HeadlessTtyCollector'] = None
         self.images_subdir = images_subdir or 'images'
         self.log_cfg = log_cfg or LogConfig()
         self._log_path = os.path.join(self.ckpt_dir, (self.log_cfg.supervisor or 'supervisor.log'))
@@ -602,6 +683,11 @@ class WrapperSupervisor:
         self._sigchld_installed: bool = False
         # Ctrl-C handling (double press to exit all)
         self._last_sigint_ts: float | None = None
+        self.headless = headless
+        self.tty_buf_lines = tty_buf_lines
+        self.agent_module = agent_module
+        self.agent_endpoint = agent_endpoint
+        self.ckpt_enabled = ckpt_enabled
 
     # ---- discovery helpers ----
     def _cmd_names(self) -> tuple[str, str, int]:
@@ -964,6 +1050,8 @@ class WrapperSupervisor:
         return path
 
     async def save_checkpoint(self, name: Optional[str] = None) -> dict:
+        if not self.ckpt_enabled:
+            return {"ok": False, "error": "ckpt_disabled"}
         if not (self.wrapper_proc and self.wrapper_proc.poll() is None):
             return {"ok": False, "error": "wrapper_not_running"}
         # Pause I/O via wrapper cmd (best-effort)
@@ -1006,6 +1094,8 @@ class WrapperSupervisor:
         return {"ok": rc == 0, "rc": rc, "images_dir": images_dir, "dump_log": dump_log, "dump_log_tail": tail}
 
     async def restore_checkpoint(self, name_or_latest: Optional[str] = None) -> dict:
+        if not self.ckpt_enabled:
+            return {"ok": False, "error": "ckpt_disabled"}
         # Resolve images dir
         self._log('restore: resolve images_dir start')
         root = self._images_root()
@@ -1328,13 +1418,23 @@ class WrapperSupervisor:
         env.setdefault('XSPDB_CKPT_DIR', self.ckpt_dir)
         env.setdefault('XSPDB_CMD_SOCK', self.wrap_sock)
         env.setdefault('XSPDB_TTY_SOCK', self.data_sock)
+        if self.agent_module:
+            env.setdefault('XSPDB_AGENT_MODULE', self.agent_module)
+        if self.agent_endpoint:
+            env.setdefault('XSPDB_AGENT_ENDPOINT', self.agent_endpoint)
+        if self.headless:
+            env.setdefault('XSPDB_AGENT_STANDALONE', '1')
         self.wrapper_proc = subprocess.Popen(args, env=env)
         # Start API server
         self.api_server = SupervisorApiServer(self.api_sock, self)
         await self.api_server.start()
-        # Start TTY proxy (wait for wrapper to create discovery file)
-        self._tty = TtyProxy(self)
-        await self._tty.start()
+        # Start TTY handler (headless collector or interactive proxy)
+        if self.headless:
+            self._tty_sink = HeadlessTtyCollector(self, buf_lines=self.tty_buf_lines)
+            await self._tty_sink.start()
+        else:
+            self._tty = TtyProxy(self)
+            await self._tty.start()
         # Watch wrapper exit to shutdown supervisor automatically
         async def _watch_wrapper_exit():
             try:
@@ -1357,6 +1457,11 @@ class WrapperSupervisor:
             if self._tty:
                 try:
                     await self._tty.stop()
+                except Exception:
+                    pass
+            if self._tty_sink:
+                try:
+                    await self._tty_sink.stop()
                 except Exception:
                     pass
         return 0
@@ -1415,6 +1520,13 @@ def main():
     ap.add_argument("--sock", default=None, help="XSPdb API discovery path (.shm JSON)")
     ap.add_argument("--wrap-sock", default=None, help="wrapper control discovery path (.shm JSON)")
     ap.add_argument("--data-sock", default=None, help="wrapper data discovery path (.shm JSON)")
+    ap.add_argument("--headless", action="store_true", help="run without local TTY (drain TTY to buffer/log)")
+    ap.add_argument("--tty-buf-lines", type=int, default=int(os.environ.get('XSPDB_TTY_BUF_LINES', '4096')),
+                    help="lines to keep in headless TTY ring buffer")
+    ap.add_argument("--agent-module", default=os.environ.get('XSPDB_AGENT_MODULE'), help="Python module/path for in-target agent")
+    ap.add_argument("--agent-endpoint", default=os.environ.get('XSPDB_AGENT_ENDPOINT'), help="agent discovery path (shm JSON)")
+    ap.add_argument("--ckpt-enable", default=os.environ.get('XSPDB_CKPT_ENABLE', '1'),
+                    help="enable checkpointing (default 1); set 0/false to disable CRIU ops")
     ap.add_argument("--", dest="dashdash", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("target", nargs=argparse.REMAINDER, help="target command to run after --")
     args = ap.parse_args()
@@ -1422,6 +1534,8 @@ def main():
     api_sock = args.sock or os.environ.get('XSPDB_API_SOCK', os.path.join(ckpt_dir, 'api.shm'))
     wrap_sock = args.wrap_sock or os.environ.get('XSPDB_WRAP_SOCK', os.path.join(ckpt_dir, 'cmdapi.shm'))
     data_sock = args.data_sock or os.environ.get('XSPDB_TTY_SOCK', os.path.join(ckpt_dir, 'tty.shm'))
+    headless = args.headless or os.environ.get('XSPDB_HEADLESS', '0').lower() in ('1', 'true', 'yes')
+    ckpt_enabled = str(args.ckpt_enable).lower() in ('1', 'true', 'yes')
     # Build log config from env if present
     log_cfg = LogConfig(
         supervisor=os.environ.get('XSPDB_SUPERVISOR_LOG', 'supervisor.log'),
@@ -1438,6 +1552,11 @@ def main():
         data_sock=data_sock,
         images_subdir=os.environ.get('XSPDB_IMAGES_SUBDIR', 'images'),
         log_cfg=log_cfg,
+        headless=headless,
+        tty_buf_lines=args.tty_buf_lines,
+        agent_module=args.agent_module,
+        agent_endpoint=args.agent_endpoint,
+        ckpt_enabled=ckpt_enabled,
     )
     try:
         return asyncio.run(sup.run())

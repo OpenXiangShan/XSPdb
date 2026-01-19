@@ -40,6 +40,8 @@ class CmdCkpt:
         self._ckpt_manifest = os.environ.get("XSPDB_CKPT_MANIFEST", os.path.join(self._ckpt_root, "manifest.json"))
         # Base directory for relative paths
         self._ckpt_base = os.path.abspath(os.environ.get("XSPDB_CKPT_BASE", os.getcwd()))
+        # Optional toggle to disable CKPT (for environments without CRIU/root)
+        self._ckpt_enabled = str(os.environ.get("XSPDB_CKPT_ENABLE", "1")).lower() in ("1", "true", "yes")
 
     # ---------- helpers ----------
     def api_criu_available(self):
@@ -99,6 +101,9 @@ class CmdCkpt:
 
     # ---------- core ops ----------
     def api_ckpt_save(self, name=None, leave_running=True, extra_args=None):
+        if not self._ckpt_enabled:
+            warn("Checkpointing disabled by XSPDB_CKPT_ENABLE")
+            return False
         # First, compute and stage external files snapshot
         ckpt_name = self.api_ckpt_make_name(name)
         ckpt_dir = self.api_ckpt_path(ckpt_name)
@@ -164,6 +169,9 @@ class CmdCkpt:
         return True
 
     def api_ckpt_restore(self, name=None, kill_current=False, extra_args=None):
+        if not self._ckpt_enabled:
+            warn("Checkpointing disabled by XSPDB_CKPT_ENABLE")
+            return False
         # Prefer supervisor mode if available (recommended)
         if self._ckpt_sock and os.path.exists(self._ckpt_sock):
             req = {"cmd": "restore", "name": name}

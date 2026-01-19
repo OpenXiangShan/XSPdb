@@ -5,6 +5,8 @@ import sys
 import argparse
 import logging
 import time
+import importlib
+import threading
 
 logging_level_map = {"debug": logging.DEBUG,
                       "info": logging.INFO,
@@ -132,6 +134,26 @@ def run_replay(xspdb, replay_path, it_time):
     xspdb.api_append_init_cmd("xnop")
     xspdb.set_trace()
     return False
+
+
+def _start_agent_if_configured(xspdb):
+    """Start in-process agent when env vars are provided."""
+    ep = os.environ.get("XSPDB_AGENT_ENDPOINT")
+    mod = os.environ.get("XSPDB_AGENT_MODULE", "server.agent")
+    if not ep:
+        return None
+    try:
+        from server.agent import AgentConfig, load_and_start_agent, start_agent
+    except Exception as ex:
+        XSPdb.warn(f"Failed to import agent module: {ex}")
+        return None
+    cfg = AgentConfig.from_env()
+    cfg.endpoint = ep
+    try:
+        return load_and_start_agent(xspdb, mod, cfg)
+    except Exception as ex:
+        XSPdb.warn(f"Failed to start agent: {ex}")
+        return None
 
 
 def run_commits(xspdb, commits, max_run_time):
@@ -325,8 +347,23 @@ def main(args, xspdb):
 if __name__ == "__main__":
     args, xspdb = create_xspdb()
     import bdb
+    agent_srv = _start_agent_if_configured(xspdb)
+    standalone_agent = os.environ.get("XSPDB_AGENT_STANDALONE", "0").lower() in ("1", "true", "yes")
     try:
-        main(args, xspdb)
-        XSPdb.info("Exit.")
+        if standalone_agent and agent_srv:
+            XSPdb.info("Agent standalone mode enabled. Waiting for requests...")
+            while True:
+                time.sleep(1.0)
+        else:
+            main(args, xspdb)
+            XSPdb.info("Exit.")
     except bdb.BdbQuit:
         pass
+    except KeyboardInterrupt:
+        XSPdb.warn("Interrupted")
+    finally:
+        if agent_srv:
+            try:
+                agent_srv.stop(unlink=True)
+            except Exception:
+                pass
