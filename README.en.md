@@ -171,6 +171,9 @@ options:
 - `xreset` Reset DUT
 - `xlist_xclock_cb` List all xclock callbacks
 - `xui` Enter the Text UI interface
+- `xfork_backup_on` Enable fork backup waveform
+- `xfork_backup_off` Disable fork backup waveform
+- `xfork_backup_status` Show fork backup status
 - `xdasm` Disassemble memory data
 - `xdasmflash` Disassemble Flash data
 - `xdasmbytes` Disassemble binary data
@@ -192,3 +195,28 @@ options:
 - `xlist_freg_map` List floating-point register mappings
 
 You can use `xcmds` to list all commands, their descriptions, and the modules they belong to (use `xapis` to list all APIs, their descriptions, and their modules).
+
+### Fork Backup Waveform (xbreak-triggered)
+
+This feature keeps a wall-clock “lagging child process”. When an xbreak triggers, the child wakes up, starts waveform, and runs until it hits the same break.
+
+Notes:
+
+- Works on the `xstep` path (TUI/interactive). It does not run in the `emu.py` batch loop.
+- Child logs are written to `fork_backup.log`; parent wake/reap logs are written to `fork_backup_parent.log`.
+- Waveforms are written to the current working directory by default, keeping only the latest 2 files.
+
+Example:
+
+```bash
+(XiangShan) xfork_backup_on 10
+(XiangShan) xbreak SimTop_top.SimTop.timer eq 123456
+(XiangShan) xstep 10000
+```
+
+Optional parameters:
+
+- `xfork_backup_on [window_sec] [wave_dir] [log_path]`
+  - `window_sec`: wall-clock window in seconds (default 10)
+  - `wave_dir`: waveform output directory (default current dir)
+  - `log_path`: child log path (default `./fork_backup.log`)

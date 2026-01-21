@@ -175,6 +175,9 @@ options:
 - `xreset` Reset DUT （重置DUT）
 - `xlist_xclock_cb` List all xclock callbacks （列出所有xclock回调）
 - `xui` Enter the Text UI interface （进入文本用户界面）
+- `xfork_backup_on` Enable fork backup waveform （启用fork备份波形）
+- `xfork_backup_off` Disable fork backup waveform （关闭fork备份波形）
+- `xfork_backup_status` Show fork backup status （查看fork备份状态）
 - `xdasm` Disassemble memory data （反汇编内存数据）
 - `xdasmflash` Disassemble Flash data （反汇编Flash数据）
 - `xdasmbytes` Disassemble binary data （反汇编二进制数据）
@@ -196,3 +199,28 @@ options:
 - `xlist_freg_map` List floating-point register mappings （列出浮点寄存器映射）
 
 可通过`xcmds`列出所有命令，说明和所在module（通过`xapis`列出所有API，说明和所在module）。
+
+### Fork 备份波形（xbreak 触发）
+
+用于在 wall-clock 时间窗口内保留一个“滞后子进程”，当 xbreak 触发时唤醒子进程开启波形并跑到同一断点位置。
+
+注意事项：
+
+- 该功能依赖 `xstep` 的执行路径（TUI/交互式运行），非 `emu.py` 的批量循环不会触发 fork tick。
+- 子进程日志写入 `fork_backup.log`，父进程唤醒/回收日志写入 `fork_backup_parent.log`。
+- 波形文件默认输出到当前工作目录，最多保留 2 个最新文件。
+
+示例：
+
+```bash
+(XiangShan) xfork_backup_on 10          # 10s 窗口
+(XiangShan) xbreak SimTop_top.SimTop.timer eq 123456
+(XiangShan) xstep 10000
+```
+
+可选参数：
+
+- `xfork_backup_on [window_sec] [wave_dir] [log_path]`
+  - `window_sec`：wall-clock 窗口秒数（默认 10）
+  - `wave_dir`：波形输出目录（默认当前目录）
+  - `log_path`：子进程日志路径（默认 `./fork_backup.log`）
