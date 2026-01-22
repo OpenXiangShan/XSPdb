@@ -196,6 +196,55 @@ options:
 
 You can use `xcmds` to list all commands, their descriptions, and the modules they belong to (use `xapis` to list all APIs, their descriptions, and their modules).
 
+### XSPdb Breakpoint Examples (`xbreak` / `xbreak_expr` / `xbreak_fsm`)
+
+These commands can be used directly at the XSPdb prompt:
+
+```bash
+(XiangShan) xbreak SimTop_top.SimTop.timer eq 123456
+(XiangShan) xbreak_expr "(sigA == 1) and within(200, sigB == 1)"
+(XiangShan) xbreak_fsm ./trigger.fsm
+```
+
+### Expression Breakpoints (`xbreak_expr`)
+
+Use Python-style expressions for breakpoints, with time-window helpers
+`within/hold`.
+
+Example:
+
+```bash
+(XiangShan) xbreak_expr "(sigA == 1) and within(200, sigB == 1)"
+(XiangShan) xbreak_expr "hold(4, sigC == 1)"
+```
+
+### FSM Breakpoints (`xbreak_fsm`)
+
+Load an FSM trigger program from file for multi-step conditions.
+
+Example:
+
+```bash
+(XiangShan) xbreak_fsm ./trigger.fsm
+```
+
+Example `trigger.fsm`:
+
+```text
+start IDLE
+
+state IDLE:
+  reset $counter_timeout
+  if sigA == 1 goto WAIT_B
+  else goto IDLE
+
+state WAIT_B:
+  inc $counter_timeout
+  if hold(4, sigB == 1) trigger
+  elif $counter_timeout >= 200 goto IDLE
+  else goto WAIT_B
+```
+
 ### Fork Backup Waveform (xbreak-triggered)
 
 This feature keeps a wall-clock “lagging child process”. When an xbreak triggers, the child wakes up, starts waveform, and runs until it hits the same break.

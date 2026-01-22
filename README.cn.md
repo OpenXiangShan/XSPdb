@@ -200,6 +200,54 @@ options:
 
 可通过`xcmds`列出所有命令，说明和所在module（通过`xapis`列出所有API，说明和所在module）。
 
+### XSPdb 断点示例（xbreak / xbreak_expr / xbreak_fsm）
+
+以下示例均为 XSPdb 交互提示符下可直接使用的命令：
+
+```bash
+(XiangShan) xbreak SimTop_top.SimTop.timer eq 123456
+(XiangShan) xbreak_expr "(sigA == 1) and within(200, sigB == 1)"
+(XiangShan) xbreak_fsm ./trigger.fsm
+```
+
+### 表达式断点（xbreak_expr）
+
+使用 Python 风格表达式设置断点，支持 `within/hold` 时间窗口。
+
+示例：
+
+```bash
+(XiangShan) xbreak_expr "(sigA == 1) and within(200, sigB == 1)"
+(XiangShan) xbreak_expr "hold(4, sigC == 1)"
+```
+
+### FSM 断点（xbreak_fsm）
+
+从文件加载状态机触发器，适合复杂时序条件。
+
+示例：
+
+```bash
+(XiangShan) xbreak_fsm ./trigger.fsm
+```
+
+示例文件 `trigger.fsm`：
+
+```text
+start IDLE
+
+state IDLE:
+  reset $counter_timeout
+  if sigA == 1 goto WAIT_B
+  else goto IDLE
+
+state WAIT_B:
+  inc $counter_timeout
+  if hold(4, sigB == 1) trigger
+  elif $counter_timeout >= 200 goto IDLE
+  else goto WAIT_B
+```
+
 ### Fork 备份波形（xbreak 触发）
 
 用于在 wall-clock 时间窗口内保留一个“滞后子进程”，当 xbreak 触发时唤醒子进程开启波形并跑到同一断点位置。

@@ -7,6 +7,10 @@ XSPython/*
 *.fst
 *.vcd
 *.hier
+.xspdb_ckpt
+xcomm/*
+picker/*
+uv.lock
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
